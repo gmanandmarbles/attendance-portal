@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RFID Attendance - Ocean Theme</title>
+  <script src="https://cdn.jsdelivr.net/npm/tsparticles@2/tsparticles.bundle.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background: linear-gradient(270deg, #003b5c, #0077b6, #00b4d8);
+      background-size: 600% 600%;
+      animation: gradientMove 20s ease infinite;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      overflow: hidden;
+      position: relative;
+    }
+
+    #tsparticles {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      z-index: -1;
+    }
+
+    @keyframes gradientMove {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    .wave-bars {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: none;
+      z-index: 10;
+      pointer-events: none;
+      overflow: hidden;
+      background: transparent;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .wave-bar {
+      width: 12px;
+      height: 100vh;
+      margin: 0 4px;
+      background: linear-gradient(180deg, rgba(255 255 255 / 0) 0%, rgba(255 255 255 / 0.5) 50%, rgba(255 255 255 / 0) 100%);
+      opacity: 0;
+      animation-fill-mode: forwards;
+      animation-timing-function: ease-in-out;
+      border-radius: 4px;
+      filter: drop-shadow(0 0 8px rgba(173, 216, 230, 0.7));
+    }
+
+    /* Animate bars fading in */
+    @keyframes fadeInWave {
+      0% {opacity: 0;}
+      100% {opacity: 1;}
+    }
+
+    /* Animate bars moving downward */
+    @keyframes waveBarsDown {
+      0% { transform: translateY(-100vh); }
+      100% { transform: translateY(0); }
+    }
+
+    .wave-bar:nth-child(odd) {
+      animation-delay: 0s, 0s;
+    }
+
+    .wave-bar:nth-child(even) {
+      animation-delay: 0.1s, 0s;
+    }
+
+    /* Splash effect */
+    .splash {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 250px;
+      height: 250px;
+      background: radial-gradient(circle at center, rgba(255 255 255 / 0.8) 0%, rgba(255 255 255 / 0) 70%);
+      border-radius: 50%;
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(0.5);
+      filter: drop-shadow(0 0 20px #b3e5fc);
+      z-index: 15;
+      pointer-events: none;
+      transition: opacity 0.4s ease, transform 0.4s ease;
+    }
+
+    .splash.active {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1.4);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+
+    .scanner {
+      font-size: 2.2rem;
+      margin-bottom: 10px;
+      z-index: 20;
+      display: none; /* Hidden initially, will show after animation */
+    }
+
+    .welcome {
+      font-size: 3rem;
+      opacity: 0;
+      transform: scale(0.9);
+      transition: all 0.4s ease;
+      z-index: 20;
+      text-align: center;
+      text-shadow: 0 0 8px #00b4d8;
+    }
+
+    .welcome.active {
+      opacity: 1;
+      transform: scale(1.1);
+      animation: pop 1s ease forwards;
+    }
+
+    @keyframes pop {
+      0% { opacity: 0; transform: scale(0.8); }
+      50% { opacity: 1; transform: scale(1.2); }
+      100% { transform: scale(1); }
+    }
+
+    .clock {
+      position: absolute;
+      top: 20px;
+      right: 30px;
+      font-size: 1.5rem;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 8px 16px;
+      border-radius: 12px;
+      backdrop-filter: blur(5px);
+      font-variant-numeric: tabular-nums;
+      animation: fadeIn 2s ease forwards;
+      z-index: 20;
+      user-select: none;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div id="tsparticles"></div>
+
+  <div class="clock" id="clock"></div>
+
+  <div class="wave-bars" id="waveBars">
+    <!-- 15 vertical bars -->
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+    <div class="wave-bar"></div>
+  </div>
+
+  <div class="splash" id="splash"></div>
+
+  <div class="scanner" id="scanner"></div>
+  <div class="welcome" id="welcome"></div>
+
+  <script>
+    // Particle config
+    tsParticles.load("tsparticles", {
+      background: {
+        color: "transparent"
+      },
+      fpsLimit: 60,
+      particles: {
+        number: { value: 60, density: { enable: true, value_area: 800 } },
+        color: { value: "#ffffff" },
+        opacity: {
+          value: 0.3,
+          random: true,
+          anim: { enable: true, speed: 1, opacity_min: 0.1, sync: false }
+        },
+        size: {
+          value: 2.5,
+          random: true,
+          anim: { enable: true, speed: 4, size_min: 0.3, sync: false }
+        },
+        move: {
+          enable: true,
+          speed: 0.6,
+          direction: "none",
+          outModes: "out"
+        }
+      },
+      interactivity: {
+        detectsOn: "canvas",
+        events: {
+          onHover: { enable: false },
+          onClick: { enable: false },
+          resize: true
+        }
+      },
+      detectRetina: true
+    });
+
+    const scanner = document.getElementById('scanner');
+    const welcome = document.getElementById('welcome');
+    const clock = document.getElementById('clock');
+    const waveBars = document.getElementById('waveBars');
+    const splash = document.getElementById('splash');
+
+    // Initially hide scanner text
+    scanner.style.display = 'none';
+
+    document.addEventListener('keydown', (e) => {
+      const code = e.key.toLowerCase();
+      handleScan(code);
+    });
+
+    function handleScan(code) {
+      const name = fakeLookup(code);
+      if (!name) return;
+
+      // Hide scanner immediately
+      scanner.style.display = 'none';
+      welcome.style.opacity = 0;
+      welcome.classList.remove('active');
+
+      // Show wave bars animation
+      waveBars.style.display = 'flex';
+
+      // Reset animation by forcing reflow
+      waveBars.style.animation = 'none';
+      waveBars.offsetHeight; // trigger reflow
+
+      // Animate bars fade in + move down
+      const bars = waveBars.querySelectorAll('.wave-bar');
+      bars.forEach((bar, i) => {
+        bar.style.animation = 'none';
+        bar.offsetHeight; // trigger reflow
+        bar.style.animation = `fadeInWave 1.2s forwards, waveBarsDown 2s forwards`;
+        bar.style.animationDelay = `${i * 0.07}s, 0s`;
+      });
+
+      // After bars move down (2s) + fade in (1.2s), splash appears at 2.2s
+      setTimeout(() => {
+        splash.classList.add('active');
+      }, 2200);
+
+      // After splash, hide wave bars and splash, show welcome message
+      setTimeout(() => {
+        waveBars.style.display = 'none';
+        splash.classList.remove('active');
+
+        welcome.textContent = `Welcome ${name}!`;
+        welcome.classList.add('active');
+      }, 2700);
+
+      // After welcome, reset everything and show scanner prompt again
+      setTimeout(() => {
+        welcome.classList.remove('active');
+
+        setTimeout(() => {
+          scanner.style.display = 'block';
+          scanner.textContent = 'Tap your wristband...';
+        }, 300);
+      }, 9500);
+    }
+
+    function fakeLookup(code) {
+      const map = {
+        'a': 'Alice',
+        'b': 'Bob',
+        'c': 'Charlie',
+        'd': 'Dana',
+        'e': 'Ethan'
+      };
+      return map[code] || null;
+    }
+
+    function updateClock() {
+      const now = new Date();
+      const hours = now.getHours().toString().padStart(2, '0');
+      const minutes = now.getMinutes().toString().padStart(2, '0');
+      const seconds = now.getSeconds().toString().padStart(2, '0');
+      clock.textContent = `${hours}:${minutes}:${seconds}`;
+    }
+
+    setInterval(updateClock, 1000);
+    updateClock();
+  </script>
+</body>
+</html>
