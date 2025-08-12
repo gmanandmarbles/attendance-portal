@@ -1,310 +1,512 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RFID Attendance - Ocean Theme</title>
-  <script src="https://cdn.jsdelivr.net/npm/tsparticles@2/tsparticles.bundle.min.js"></script>
-  <style>
-    body {
-      margin: 0;
-      font-family: 'Segoe UI', sans-serif;
-      background: linear-gradient(270deg, #003b5c, #0077b6, #00b4d8);
-      background-size: 600% 600%;
-      animation: gradientMove 20s ease infinite;
-      color: white;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      overflow: hidden;
-      position: relative;
-    }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RFID Attendance System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
 
-    #tsparticles {
-      position: absolute;
-      width: 100%;
-      height: 100%;
-      z-index: -1;
-    }
+        body {
+            font-family: 'Google Sans', sans-serif;
+            background-color: #F8F9FA;
+            color: #202124;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            transition: background-color 0.5s ease;
+        }
 
-    @keyframes gradientMove {
-      0% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-      100% { background-position: 0% 50%; }
-    }
+        .card {
+            background-color: #FFFFFF;
+            padding: 48px 40px;
+            border-radius: 20px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 480px;
+            position: relative;
+            animation: fadeIn 0.6s ease-in-out;
+        }
 
-    .wave-bars {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      display: none;
-      z-index: 10;
-      pointer-events: none;
-      overflow: hidden;
-      background: transparent;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
+        h1 {
+            font-size: 2.25rem;
+            font-weight: 500;
+            color: #1A73E8;
+            margin: 0 0 16px 0;
+        }
 
-    .wave-bar {
-      width: 12px;
-      height: 100vh;
-      margin: 0 4px;
-      background: linear-gradient(180deg, rgba(255 255 255 / 0) 0%, rgba(255 255 255 / 0.5) 50%, rgba(255 255 255 / 0) 100%);
-      opacity: 0;
-      animation-fill-mode: forwards;
-      animation-timing-function: ease-in-out;
-      border-radius: 4px;
-      filter: drop-shadow(0 0 8px rgba(173, 216, 230, 0.7));
-    }
+        .subheading {
+            font-size: 1rem;
+            color: #5F6368;
+            margin-bottom: 32px;
+        }
+        
+        .message-area {
+            min-height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
 
-    /* Animate bars fading in */
-    @keyframes fadeInWave {
-      0% {opacity: 0;}
-      100% {opacity: 1;}
-    }
+        .scanner {
+            font-size: 1.25rem;
+            font-weight: 400;
+            color: #5F6368;
+            transition: opacity 0.3s ease;
+        }
+        
+        .button-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-top: 32px;
+        }
+        
+        button {
+            padding: 16px 24px;
+            font-size: 1rem;
+            font-weight: 500;
+            border: 1px solid #DADCE0;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            background-color: #F1F3F4;
+            color: #202124;
+        }
 
-    /* Animate bars moving downward */
-    @keyframes waveBarsDown {
-      0% { transform: translateY(-100vh); }
-      100% { transform: translateY(0); }
-    }
+        button:hover {
+            background-color: #E8F0FE;
+            border-color: #D2E3FC;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
 
-    .wave-bar:nth-child(odd) {
-      animation-delay: 0s, 0s;
-    }
+        button:active {
+            transform: scale(0.98);
+        }
 
-    .wave-bar:nth-child(even) {
-      animation-delay: 0.1s, 0s;
-    }
+        .action-button {
+            background-color: #1A73E8;
+            color: #FFFFFF;
+            border-color: #1A73E8;
+        }
 
-    /* Splash effect */
-    .splash {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 250px;
-      height: 250px;
-      background: radial-gradient(circle at center, rgba(255 255 255 / 0.8) 0%, rgba(255 255 255 / 0) 70%);
-      border-radius: 50%;
-      opacity: 0;
-      transform: translate(-50%, -50%) scale(0.5);
-      filter: drop-shadow(0 0 20px #b3e5fc);
-      z-index: 15;
-      pointer-events: none;
-      transition: opacity 0.4s ease, transform 0.4s ease;
-    }
+        .action-button:hover {
+            background-color: #185ABC;
+            border-color: #185ABC;
+            box-shadow: 0 2px 6px rgba(26, 115, 232, 0.3);
+        }
 
-    .splash.active {
-      opacity: 1;
-      transform: translate(-50%, -50%) scale(1.4);
-      transition: opacity 0.6s ease, transform 0.6s ease;
-    }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.5);
+            padding-top: 60px;
+            animation: fadeIn 0.3s;
+        }
+        
+        .modal-content {
+            background-color: #FFFFFF;
+            margin: 5% auto;
+            padding: 24px;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 440px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+            position: relative;
+            text-align: left;
+            animation: slideIn 0.4s;
+        }
 
-    .scanner {
-      font-size: 2.2rem;
-      margin-bottom: 10px;
-      z-index: 20;
-      display: none; /* Hidden initially, will show after animation */
-    }
+        .modal-content h3 {
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: #202124;
+            margin: 0 0 16px 0;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #E8EAED;
+        }
 
-    .welcome {
-      font-size: 3rem;
-      opacity: 0;
-      transform: scale(0.9);
-      transition: all 0.4s ease;
-      z-index: 20;
-      text-align: center;
-      text-shadow: 0 0 8px #00b4d8;
-    }
+        .modal-content ul {
+            list-style-type: none;
+            padding: 0;
+            max-height: 300px;
+            overflow-y: auto;
+        }
 
-    .welcome.active {
-      opacity: 1;
-      transform: scale(1.1);
-      animation: pop 1s ease forwards;
-    }
+        .modal-content li {
+            padding: 12px;
+            border-bottom: 1px solid #E8EAED;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
 
-    @keyframes pop {
-      0% { opacity: 0; transform: scale(0.8); }
-      50% { opacity: 1; transform: scale(1.2); }
-      100% { transform: scale(1); }
-    }
+        .modal-content li:last-child {
+            border-bottom: none;
+        }
 
-    .clock {
-      position: absolute;
-      top: 20px;
-      right: 30px;
-      font-size: 1.5rem;
-      background: rgba(255, 255, 255, 0.1);
-      padding: 8px 16px;
-      border-radius: 12px;
-      backdrop-filter: blur(5px);
-      font-variant-numeric: tabular-nums;
-      animation: fadeIn 2s ease forwards;
-      z-index: 20;
-      user-select: none;
-    }
+        .modal-content li:hover {
+            background-color: #F1F3F4;
+        }
+        
+        .close-button {
+            color: #9AA0A6;
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: color 0.2s ease;
+        }
+        
+        .close-button:hover {
+            color: #5F6368;
+        }
+        
+        #messageModal .modal-content {
+            text-align: center;
+            padding: 32px;
+        }
+        
+        #messageModal h3 {
+            font-size: 1.5rem;
+            margin: 0 0 8px 0;
+        }
+        
+        #messageModal p {
+            font-size: 1rem;
+            margin-bottom: 24px;
+            color: #5F6368;
+        }
+        
+        #messageModal button {
+            background-color: #1A73E8;
+            color: #FFFFFF;
+            border: none;
+            padding: 12px 24px;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+        
+        .message-success {
+            background-color: #E6F4EA;
+            color: #137333;
+        }
 
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(-10px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-  </style>
+        .message-error {
+            background-color: #FDE2E2;
+            color: #D93025;
+        }
+
+        .message-info {
+            background-color: #E8F0FE;
+            color: #185ABC;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateY(-30px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+    </style>
 </head>
 <body>
-  <div id="tsparticles"></div>
 
-  <div class="clock" id="clock"></div>
+    <div class="card">
+        <h1>RFID Attendance</h1>
+        <p class="subheading" id="subheading">Scan your badge to get started</p>
+        
+        <div class="message-area">
+            <div class="scanner" id="scanner">Ready to scan...</div>
+        </div>
+        
+        <div class="button-grid" id="actionButtonsContainer" style="display: none;">
+            <button class="action-button" id="checkInOutButton"></button>
+            <button class="action-button" id="breakInOutButton"></button>
+            <button id="cancelButton">Cancel</button>
+        </div>
 
-  <div class="wave-bars" id="waveBars">
-    <!-- 15 vertical bars -->
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-    <div class="wave-bar"></div>
-  </div>
+        <div class="button-grid" id="defaultButtons">
+            <button id="onBreakButton">Who's on Break?</button>
+            <button id="checkedInButton">Who's Checked In?</button>
+        </div>
+    </div>
 
-  <div class="splash" id="splash"></div>
+    <div id="reportModal" class="modal">
+        <div class="modal-content">
+            <span class="close-button" id="closeModal">&times;</span>
+            <h3 id="modalTitle"></h3>
+            <ul id="reportList"></ul>
+        </div>
+    </div>
+    
+    <div id="messageModal" class="modal">
+        <div class="modal-content" id="messageModalContent">
+            <h3 id="messageTitle"></h3>
+            <p id="messageText"></p>
+            <button id="messageOkButton">OK</button>
+        </div>
+    </div>
 
-  <div class="scanner" id="scanner"></div>
-  <div class="welcome" id="welcome"></div>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen();
+            }
+        });
 
-  <script>
-    // Particle config
-    tsParticles.load("tsparticles", {
-      background: {
-        color: "transparent"
-      },
-      fpsLimit: 60,
-      particles: {
-        number: { value: 60, density: { enable: true, value_area: 800 } },
-        color: { value: "#ffffff" },
-        opacity: {
-          value: 0.3,
-          random: true,
-          anim: { enable: true, speed: 1, opacity_min: 0.1, sync: false }
-        },
-        size: {
-          value: 2.5,
-          random: true,
-          anim: { enable: true, speed: 4, size_min: 0.3, sync: false }
-        },
-        move: {
-          enable: true,
-          speed: 0.6,
-          direction: "none",
-          outModes: "out"
+        const scanner = document.getElementById('scanner');
+        const subheading = document.getElementById('subheading');
+        const defaultButtons = document.getElementById('defaultButtons');
+        
+        const actionButtonsContainer = document.getElementById('actionButtonsContainer');
+        const checkInOutButton = document.getElementById('checkInOutButton');
+        const breakInOutButton = document.getElementById('breakInOutButton');
+        const cancelButton = document.getElementById('cancelButton');
+
+        const onBreakButton = document.getElementById('onBreakButton');
+        const checkedInButton = document.getElementById('checkedInButton');
+        
+        const reportModal = document.getElementById('reportModal');
+        const closeModalButton = document.getElementById('closeModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const reportList = document.getElementById('reportList');
+        
+        const messageModal = document.getElementById('messageModal');
+        const messageModalContent = document.getElementById('messageModalContent');
+        const messageTitle = document.getElementById('messageTitle');
+        const messageText = document.getElementById('messageText');
+        const messageOkButton = document.getElementById('messageOkButton');
+
+        let scannedRfidCode = null;
+        let scannedUser = null;
+        
+        document.addEventListener('keydown', async (e) => {
+            const rfidCode = e.key.toLowerCase();
+            if (rfidCode.length !== 1) return;
+            
+            if (actionButtonsContainer.style.display === 'none') {
+                await handleScanAndShowOptions(rfidCode);
+            }
+        });
+        
+        function setUIState(state, user = null) {
+            if (state === 'default') {
+                scanner.textContent = 'Ready to scan...';
+                subheading.textContent = 'Scan your badge to get started';
+                defaultButtons.style.display = 'grid';
+                actionButtonsContainer.style.display = 'none';
+                scannedRfidCode = null;
+                scannedUser = null;
+            } else if (state === 'showOptions') {
+                scanner.textContent = `Hello, ${user.name}!`;
+                subheading.textContent = `What would you like to do?`;
+                defaultButtons.style.display = 'none';
+                actionButtonsContainer.style.display = 'grid';
+
+                if (user.status === 'checked_out') {
+                    checkInOutButton.textContent = 'Check In';
+                    checkInOutButton.style.display = 'block';
+                    breakInOutButton.style.display = 'none';
+                } else if (user.status === 'checked_in') {
+                    checkInOutButton.textContent = 'Check Out';
+                    checkInOutButton.style.display = 'block';
+                    breakInOutButton.textContent = 'Go on Break';
+                    breakInOutButton.style.display = 'block';
+                } else if (user.status === 'on_break') {
+                    checkInOutButton.style.display = 'none';
+                    breakInOutButton.textContent = 'Return from Break';
+                    breakInOutButton.style.display = 'block';
+                }
+            }
         }
-      },
-      interactivity: {
-        detectsOn: "canvas",
-        events: {
-          onHover: { enable: false },
-          onClick: { enable: false },
-          resize: true
+        
+        async function handleScanAndShowOptions(rfidCode) {
+            try {
+                const response = await fetch('/api/get-user-status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rfid_code: rfidCode }),
+                });
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    showMessageModal('Error', data.error, 'error');
+                } else {
+                    scannedRfidCode = rfidCode;
+                    scannedUser = data.user;
+                    setUIState('showOptions', data.user);
+                }
+            } catch (error) {
+                console.error('Network or server error:', error);
+                showMessageModal('Error', 'Server Error. Please try again.', 'error');
+            }
         }
-      },
-      detectRetina: true
-    });
+        
+        async function performAction(actionType) {
+            if (!scannedRfidCode) return;
+            
+            let endpoint, body;
+            
+            if (actionType === 'check-in') {
+                endpoint = '/api/check-in';
+                body = { rfid_code: scannedRfidCode };
+            } else if (actionType === 'check-out') {
+                endpoint = '/api/check-out';
+                body = { rfid_code: scannedRfidCode };
+            } else if (actionType === 'break-start') {
+                endpoint = '/api/break/start';
+                body = { rfid_code: scannedRfidCode };
+            } else if (actionType === 'break-end') {
+                endpoint = '/api/break/end';
+                body = { user_id: scannedUser.id };
+            }
+            
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    showMessageModal('Error', data.error, 'error');
+                } else {
+                    showMessageModal('Success', data.message, 'success');
+                }
+            } catch (error) {
+                console.error('Network or server error:', error);
+                showMessageModal('Error', 'Server Error. Please try again.', 'error');
+            }
+        }
+        
+        function showMessageModal(title, text, type = 'success') {
+            messageTitle.textContent = title;
+            messageText.textContent = text;
+            
+            messageModalContent.classList.remove('message-success', 'message-error', 'message-info');
+            messageModalContent.classList.add(`message-${type}`);
+            
+            messageModal.style.display = 'flex';
+        }
+        
+        function showReportModal(title, items, isBreakList = false) {
+            modalTitle.textContent = title;
+            reportList.innerHTML = '';
+            
+            if (items.length > 0) {
+                items.forEach(item => {
+                    const li = document.createElement('li');
+                    li.textContent = item.name || item; 
+                    if (isBreakList) {
+                        li.addEventListener('click', () => {
+                            if (confirm(`Return ${item.name} from break?`)) {
+                                returnFromBreak(item.id, item.name);
+                            }
+                        });
+                    }
+                    reportList.appendChild(li);
+                });
+            } else {
+                reportList.innerHTML = '<li>No one found.</li>';
+            }
+            reportModal.style.display = 'block';
+        }
+        
+        async function returnFromBreak(userId, userName) {
+            try {
+                const response = await fetch('/api/break/end', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId }),
+                });
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    showMessageModal('Error', `Error ending break for ${userName}: ${data.error}`, 'error');
+                } else {
+                    showMessageModal('Success', data.message, 'success');
+                }
+                reportModal.style.display = 'none';
+            } catch (error) {
+                console.error('Error returning from break:', error);
+                showMessageModal('Error', 'Could not return from break. Server error.', 'error');
+            }
+        }
+        
+        checkInOutButton.addEventListener('click', () => {
+            if (scannedUser.status === 'checked_out') {
+                performAction('check-in');
+            } else if (scannedUser.status === 'checked_in') {
+                performAction('check-out');
+            }
+        });
 
-    const scanner = document.getElementById('scanner');
-    const welcome = document.getElementById('welcome');
-    const clock = document.getElementById('clock');
-    const waveBars = document.getElementById('waveBars');
-    const splash = document.getElementById('splash');
+        breakInOutButton.addEventListener('click', () => {
+            if (scannedUser.status === 'checked_in') {
+                performAction('break-start');
+            } else if (scannedUser.status === 'on_break') {
+                performAction('break-end');
+            }
+        });
 
-    // Initially hide scanner text
-    scanner.style.display = 'none';
+        cancelButton.addEventListener('click', () => {
+            setUIState('default');
+        });
 
-    document.addEventListener('keydown', (e) => {
-      const code = e.key.toLowerCase();
-      handleScan(code);
-    });
+        onBreakButton.addEventListener('click', async () => {
+            const response = await fetch('/api/status/onbreak');
+            const data = await response.json();
+            showReportModal("Users on Break", data.users_on_break.map(u => u.name));
+        });
 
-    function handleScan(code) {
-      const name = fakeLookup(code);
-      if (!name) return;
+        checkedInButton.addEventListener('click', async () => {
+            const response = await fetch('/api/status/checkedin');
+            const data = await response.json();
+            showReportModal("Users Checked In", data.users_checked_in);
+        });
+        
+        closeModalButton.addEventListener('click', () => {
+            reportModal.style.display = 'none';
+        });
 
-      // Hide scanner immediately
-      scanner.style.display = 'none';
-      welcome.style.opacity = 0;
-      welcome.classList.remove('active');
+        messageOkButton.addEventListener('click', () => {
+            messageModal.style.display = 'none';
+            setUIState('default');
+        });
 
-      // Show wave bars animation
-      waveBars.style.display = 'flex';
-
-      // Reset animation by forcing reflow
-      waveBars.style.animation = 'none';
-      waveBars.offsetHeight; // trigger reflow
-
-      // Animate bars fade in + move down
-      const bars = waveBars.querySelectorAll('.wave-bar');
-      bars.forEach((bar, i) => {
-        bar.style.animation = 'none';
-        bar.offsetHeight; // trigger reflow
-        bar.style.animation = `fadeInWave 1.2s forwards, waveBarsDown 2s forwards`;
-        bar.style.animationDelay = `${i * 0.07}s, 0s`;
-      });
-
-      // After bars move down (2s) + fade in (1.2s), splash appears at 2.2s
-      setTimeout(() => {
-        splash.classList.add('active');
-      }, 2200);
-
-      // After splash, hide wave bars and splash, show welcome message
-      setTimeout(() => {
-        waveBars.style.display = 'none';
-        splash.classList.remove('active');
-
-        welcome.textContent = `Welcome ${name}!`;
-        welcome.classList.add('active');
-      }, 2700);
-
-      // After welcome, reset everything and show scanner prompt again
-      setTimeout(() => {
-        welcome.classList.remove('active');
-
-        setTimeout(() => {
-          scanner.style.display = 'block';
-          scanner.textContent = 'Tap your wristband...';
-        }, 300);
-      }, 9500);
-    }
-
-    function fakeLookup(code) {
-      const map = {
-        'a': 'Alice',
-        'b': 'Bob',
-        'c': 'Charlie',
-        'd': 'Dana',
-        'e': 'Ethan'
-      };
-      return map[code] || null;
-    }
-
-    function updateClock() {
-      const now = new Date();
-      const hours = now.getHours().toString().padStart(2, '0');
-      const minutes = now.getMinutes().toString().padStart(2, '0');
-      const seconds = now.getSeconds().toString().padStart(2, '0');
-      clock.textContent = `${hours}:${minutes}:${seconds}`;
-    }
-
-    setInterval(updateClock, 1000);
-    updateClock();
-  </script>
+        window.onclick = function(event) {
+            if (event.target === reportModal) {
+                reportModal.style.display = 'none';
+            }
+            if (event.target === messageModal) {
+                messageModal.style.display = 'none';
+                setUIState('default');
+            }
+        };
+        
+        setUIState('default');
+    </script>
 </body>
 </html>
