@@ -35,13 +35,41 @@ const db = new sqlite3.Database(DBSOURCE, (err) => {
             }
         });
 
+        // Add the new certifications table
+        db.run(`CREATE TABLE IF NOT EXISTS certifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL
+        )`, (err) => {
+            if (err) {
+                console.error('Error creating certifications table:', err.message);
+            }
+        });
+
+        // Add the new user_certifications table to link users and certifications
+        db.run(`CREATE TABLE IF NOT EXISTS user_certifications (
+            user_id INTEGER,
+            certification_id INTEGER,
+            PRIMARY KEY (user_id, certification_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (certification_id) REFERENCES certifications(id) ON DELETE CASCADE
+        )`, (err) => {
+            if (err) {
+                console.error('Error creating user_certifications table:', err.message);
+            }
+        });
+
         // Only insert sample data if the database file did not exist before
         if (!dbExists) {
             console.log('Database not found, inserting sample data.');
-            const insert = 'INSERT INTO users (rfid_code, name) VALUES (?, ?)';
-            db.run(insert, ['a', 'Alice']);
-            db.run(insert, ['b', 'Bob']);
-            db.run(insert, ['c', 'Charlie']);
+            const insertUser = 'INSERT INTO users (rfid_code, name) VALUES (?, ?)';
+            db.run(insertUser, ['a', 'Alice']);
+            db.run(insertUser, ['b', 'Bob']);
+            db.run(insertUser, ['c', 'Charlie']);
+
+            const insertCert = 'INSERT INTO certifications (name) VALUES (?)';
+            db.run(insertCert, ['First Aid']);
+            db.run(insertCert, ['Forklift Operator']);
+            db.run(insertCert, ['CPR Certified']);
         }
     }
 });

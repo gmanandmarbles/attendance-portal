@@ -360,16 +360,99 @@ app.get('/api/admin/attendance/pdf', (req, res) => {
             logs.forEach(log => {
                 const timestamp = new Date(log.timestamp);
                 const time = timestamp.toLocaleTimeString();
-                if (log.action === 'check_in') { checkInTime = time; doc.text(`  - Checked In: ${time}`); }
-                else if (log.action === 'check_out' || log.action === 'force_checkout') { const checkoutTime = time; if (checkInTime) { doc.text(`  - Checked Out: ${checkoutTime}`); checkInTime = null; } }
-                else if (log.action === 'break_start') { breakStart = time; doc.text(`  - Break Started: ${breakStart}`); }
-                else if (log.action === 'break_end') { const breakEnd = time; if (breakStart) { doc.text(`  - Break Ended: ${breakEnd}`); breakStart = null; } }
+                if (log.action === 'check_in') { checkInTime = time; doc.text(`  - Checked In: ${time}`); }
+                else if (log.action === 'check_out' || log.action === 'force_checkout') { const checkoutTime = time; if (checkInTime) { doc.text(`  - Checked Out: ${checkoutTime}`); checkInTime = null; } }
+                else if (log.action === 'break_start') { breakStart = time; doc.text(`  - Break Started: ${breakStart}`); }
+                else if (log.action === 'break_end') { const breakEnd = time; if (breakStart) { doc.text(`  - Break Ended: ${breakEnd}`); breakStart = null; } }
             });
             doc.moveDown();
         }
         doc.end();
     });
 });
+
+
+// === NEW CERTIFICATION ENDPOINTS ===
+
+// Admin endpoint to get all certifications
+app.get('/api/admin/certifications', (req, res) => {
+    db.all('SELECT id, name FROM certifications', [], (err, rows) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        res.json(rows);
+    });
+});
+
+// Admin endpoint to create a certification
+app.post('/api/admin/certifications/create', (req, res) => {
+    const { name } = req.body;
+    if (!name) {
+        return res.status(400).json({ error: 'Certification name is required.' });
+    }
+    const insert = 'INSERT INTO certifications (name) VALUES (?)';
+    db.run(insert, [name], function(err) {
+        if (err) {
+            // Check for unique constraint violation
+            if (err.message.includes('UNIQUE constraint failed')) {
+                return res.status(400).json({ error: `A certification with the name "${name}" already exists.` });
+            }
+            return res.status(500).json({ error: err.message });
+        }
+        res.json({ message: 'Certification created successfully.', certificationId: this.lastID });
+    });
+});
+
+// Admin endpoint to assign a certification to a user
+app.post('/api/admin/certifications/assign', (req, res) => {
+    const { user_id, certification_id } = req.body;
+    if (!user_id || !certification_id) {
+        return res.status(400).json({ error: 'User ID and Certification ID are required.' });
+    }
+
+    const insert = 'INSERT INTO user_certifications (user_id, certification_id) VALUES (?, ?)';
+    db.run(insert, [user_id, certification_id], function(err) {
+        if (err) {
+            if (err.message.includes('UNIQUE constraint failed')) {
+                return res.status(400).json({ error: 'This certification is already assigned to this user.' });
+            }
+            return res.status(500).json({ error: err.message });
+        }
+        res.json({ message: 'Certification assigned successfully.' });
+    });
+});
+
+// Admin endpoint to revoke a certification from a user
+app.delete('/api/admin/certifications/revoke/:userId/:certId', (req, res) => {
+    const { userId, certId } = req.params;
+    db.run('DELETE FROM user_certifications WHERE user_id = ? AND certification_id = ?', [userId, certId], function(err) {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        if (this.changes === 0) {
+            return res.status(404).json({ error: 'No such certification assignment found.' });
+        }
+        res.json({ message: 'Certification revoked successfully.' });
+    });
+});
+
+// Admin endpoint to get a user's certifications
+app.get('/api/admin/users/:userId/certifications', (req, res) => {
+    const { userId } = req.params;
+    const sql = `
+        SELECT c.id, c.name 
+        FROM certifications c
+        JOIN user_certifications uc ON c.id = uc.certification_id
+        WHERE uc.user_id = ?
+    `;
+    db.all(sql, [userId], (err, rows) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        res.json(rows);
+    });
+});
+
 
 app.use((req, res, next) => {
     res.status(404).json({ error: 'Not found' });
