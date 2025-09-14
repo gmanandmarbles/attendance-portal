@@ -260,7 +260,7 @@
 <body>
 
     <div class="card">
-        <h1>RFID Attendance</h1>
+        <h1>9449 Attendance System</h1>
         <p class="subheading" id="subheading">Scan your badge to get started</p>
         
         <div class="message-area">
@@ -340,14 +340,20 @@
     let scanTimeout;
     const SCAN_TIMEOUT_MS = 20; // Time to wait after the last keypress (milliseconds)
 
+    // New global variable for the message timer
+    let messageTimer = null;
+
     document.addEventListener('keydown', (e) => {
+        // Clear the message modal timer and hide the modal on any new keypress
+        clearTimeout(messageTimer);
+        messageModal.style.display = 'none';
+
         // Only process if a user isn't currently being displayed
         if (actionButtonsContainer.style.display !== 'none') {
             return;
         }
 
         // Check if the key is a printable character (excluding special keys like Shift, Enter, etc.)
-        // This is the key change to ensure a single, complete scan is processed.
         if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
             rfidCodeBuffer += e.key;
 
@@ -487,6 +493,9 @@
     }
 
     function showMessageModal(title, text, type = 'success') {
+        // Clear any previous timer to avoid conflicts
+        clearTimeout(messageTimer);
+        
         messageTitle.textContent = title;
         messageText.textContent = text;
 
@@ -494,6 +503,12 @@
         messageModalContent.classList.add(`message-${type}`);
 
         messageModal.style.display = 'flex';
+        setUIState('default');
+
+        // Set a new timer to hide the modal after 5 seconds
+        messageTimer = setTimeout(() => {
+            messageModal.style.display = 'none';
+        }, 5000); // 5000 milliseconds = 5 seconds
     }
 
     function showReportModal(title, items, isBreakList = false) {
@@ -577,8 +592,9 @@
     });
 
     messageOkButton.addEventListener('click', () => {
+        // When the user clicks OK, clear the timer and close the modal immediately
+        clearTimeout(messageTimer);
         messageModal.style.display = 'none';
-        setUIState('default');
     });
 
     window.onclick = function(event) {
@@ -586,8 +602,9 @@
             reportModal.style.display = 'none';
         }
         if (event.target === messageModal) {
+            // When the user clicks outside the modal, clear the timer and close it
+            clearTimeout(messageTimer);
             messageModal.style.display = 'none';
-            setUIState('default');
         }
     };
 
