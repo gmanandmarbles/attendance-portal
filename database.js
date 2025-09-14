@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 
 const DBSOURCE = path.join(__dirname, 'attendance.db');
-const dbExists = fs.existsSync(DBSOURCE);
+const dbExists = fs.existsSync(DBSOURCE); 
 
 const db = new sqlite3.Database(DBSOURCE, (err) => {
     if (err) {

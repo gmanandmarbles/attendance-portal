@@ -301,275 +301,297 @@
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            if (document.documentElement.requestFullscreen) {
-                document.documentElement.requestFullscreen();
-            }
-        });
+    document.addEventListener('DOMContentLoaded', () => {
+        if (document.documentElement.requestFullscreen) {
+            document.documentElement.requestFullscreen();
+        }
+    });
 
-        const scanner = document.getElementById('scanner');
-        const subheading = document.getElementById('subheading');
-        const defaultButtons = document.getElementById('defaultButtons');
-        
-        const actionButtonsContainer = document.getElementById('actionButtonsContainer');
-        const checkInOutButton = document.getElementById('checkInOutButton');
-        const breakInOutButton = document.getElementById('breakInOutButton');
-        const cancelButton = document.getElementById('cancelButton');
-        const certificationsSection = document.getElementById('certifications-section');
-        const certificationsList = document.getElementById('certifications-list');
+    const scanner = document.getElementById('scanner');
+    const subheading = document.getElementById('subheading');
+    const defaultButtons = document.getElementById('defaultButtons');
 
-        const onBreakButton = document.getElementById('onBreakButton');
-        const checkedInButton = document.getElementById('checkedInButton');
-        
-        const reportModal = document.getElementById('reportModal');
-        const closeModalButton = document.getElementById('closeModal');
-        const modalTitle = document.getElementById('modalTitle');
-        const reportList = document.getElementById('reportList');
-        
-        const messageModal = document.getElementById('messageModal');
-        const messageModalContent = document.getElementById('messageModalContent');
-        const messageTitle = document.getElementById('messageTitle');
-        const messageText = document.getElementById('messageText');
-        const messageOkButton = document.getElementById('messageOkButton');
+    const actionButtonsContainer = document.getElementById('actionButtonsContainer');
+    const checkInOutButton = document.getElementById('checkInOutButton');
+    const breakInOutButton = document.getElementById('breakInOutButton');
+    const cancelButton = document.getElementById('cancelButton');
+    const certificationsSection = document.getElementById('certifications-section');
+    const certificationsList = document.getElementById('certifications-list');
 
-        let scannedRfidCode = null;
-        let scannedUser = null;
-        
-        document.addEventListener('keydown', async (e) => {
-            const rfidCode = e.key.toLowerCase();
-            if (rfidCode.length !== 1) return;
-            
-            if (actionButtonsContainer.style.display === 'none') {
-                await handleScanAndShowOptions(rfidCode);
-            }
-        });
-        
-        function setUIState(state, user = null) {
-            if (state === 'default') {
-                scanner.textContent = 'Ready to scan...';
-                subheading.textContent = 'Scan your badge to get started';
-                defaultButtons.style.display = 'grid';
-                actionButtonsContainer.style.display = 'none';
-                certificationsSection.style.display = 'none';
-                scannedRfidCode = null;
-                scannedUser = null;
-            } else if (state === 'showOptions') {
-                scanner.textContent = `Hello, ${user.name}!`;
-                subheading.textContent = `What would you like to do?`;
-                defaultButtons.style.display = 'none';
-                actionButtonsContainer.style.display = 'grid';
-                certificationsSection.style.display = 'block';
+    const onBreakButton = document.getElementById('onBreakButton');
+    const checkedInButton = document.getElementById('checkedInButton');
 
-                if (user.status === 'checked_out') {
-                    checkInOutButton.textContent = 'Check In';
-                    checkInOutButton.style.display = 'block';
-                    breakInOutButton.style.display = 'none';
-                } else if (user.status === 'checked_in') {
-                    checkInOutButton.textContent = 'Check Out';
-                    checkInOutButton.style.display = 'block';
-                    breakInOutButton.textContent = 'Go on Break';
-                    breakInOutButton.style.display = 'block';
-                } else if (user.status === 'on_break') {
-                    checkInOutButton.style.display = 'none';
-                    breakInOutButton.textContent = 'Return from Break';
-                    breakInOutButton.style.display = 'block';
+    const reportModal = document.getElementById('reportModal');
+    const closeModalButton = document.getElementById('closeModal');
+    const modalTitle = document.getElementById('modalTitle');
+    const reportList = document.getElementById('reportList');
+
+    const messageModal = document.getElementById('messageModal');
+    const messageModalContent = document.getElementById('messageModalContent');
+    const messageTitle = document.getElementById('messageTitle');
+    const messageText = document.getElementById('messageText');
+    const messageOkButton = document.getElementById('messageOkButton');
+
+    let scannedRfidCode = null;
+    let scannedUser = null;
+
+    // Variables for handling multi-character input
+    let rfidCodeBuffer = '';
+    let scanTimeout;
+    const SCAN_TIMEOUT_MS = 20; // Time to wait after the last keypress (milliseconds)
+
+    document.addEventListener('keydown', (e) => {
+        // Only process if a user isn't currently being displayed
+        if (actionButtonsContainer.style.display !== 'none') {
+            return;
+        }
+
+        // Check if the key is a printable character (excluding special keys like Shift, Enter, etc.)
+        // This is the key change to ensure a single, complete scan is processed.
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            rfidCodeBuffer += e.key;
+
+            // Clear any existing timeout
+            clearTimeout(scanTimeout);
+
+            // Set a new timeout to process the full string
+            scanTimeout = setTimeout(async () => {
+                const finalCode = rfidCodeBuffer.trim();
+                if (finalCode.length > 0) {
+                    await handleScanAndShowOptions(finalCode);
                 }
-            }
+                // Reset the buffer for the next scan
+                rfidCodeBuffer = '';
+            }, SCAN_TIMEOUT_MS);
         }
-        
-        async function fetchCertificationsForUser(userId) {
-            try {
-                const response = await fetch(`/api/admin/users/${userId}/certifications`);
-                if (!response.ok) throw new Error('Failed to fetch certifications');
-                return await response.json();
-            } catch (error) {
-                console.error('Error fetching certifications:', error);
-                return [];
-            }
-        }
+    });
 
-        function displayCertifications(certifications) {
-            certificationsList.innerHTML = '';
-            if (certifications.length > 0) {
-                certifications.forEach(cert => {
-                    const li = document.createElement('li');
-                    li.classList.add('certification-tag');
-                    li.textContent = cert.name;
-                    certificationsList.appendChild(li);
-                });
-            } else {
-                certificationsList.innerHTML = '<li class="certification-tag">No certifications found.</li>';
-            }
-        }
-        
-        async function handleScanAndShowOptions(rfidCode) {
-            try {
-                const response = await fetch('/api/get-user-status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rfid_code: rfidCode }),
-                });
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    showMessageModal('Error', data.error, 'error');
-                } else {
-                    scannedRfidCode = rfidCode;
-                    scannedUser = data.user;
-                    setUIState('showOptions', data.user);
-                    const certs = await fetchCertificationsForUser(data.user.id);
-                    displayCertifications(certs);
-                }
-            } catch (error) {
-                console.error('Network or server error:', error);
-                showMessageModal('Error', 'Server Error. Please try again.', 'error');
-            }
-        }
-        
-        async function performAction(actionType) {
-            if (!scannedRfidCode) return;
-            
-            let endpoint, body;
-            
-            if (actionType === 'check-in') {
-                endpoint = '/api/check-in';
-                body = { rfid_code: scannedRfidCode };
-            } else if (actionType === 'check-out') {
-                endpoint = '/api/check-out';
-                body = { rfid_code: scannedRfidCode };
-            } else if (actionType === 'break-start') {
-                endpoint = '/api/break/start';
-                body = { rfid_code: scannedRfidCode };
-            } else if (actionType === 'break-end') {
-                endpoint = '/api/break/end';
-                body = { user_id: scannedUser.id };
-            }
-            
-            try {
-                const response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
-                });
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    showMessageModal('Error', data.error, 'error');
-                } else {
-                    showMessageModal('Success', data.message, 'success');
-                }
-            } catch (error) {
-                console.error('Network or server error:', error);
-                showMessageModal('Error', 'Server Error. Please try again.', 'error');
-            }
-        }
-        
-        function showMessageModal(title, text, type = 'success') {
-            messageTitle.textContent = title;
-            messageText.textContent = text;
-            
-            messageModalContent.classList.remove('message-success', 'message-error', 'message-info');
-            messageModalContent.classList.add(`message-${type}`);
-            
-            messageModal.style.display = 'flex';
-        }
-        
-        function showReportModal(title, items, isBreakList = false) {
-            modalTitle.textContent = title;
-            reportList.innerHTML = '';
-            
-            if (items.length > 0) {
-                items.forEach(item => {
-                    const li = document.createElement('li');
-                    li.textContent = item.name || item; 
-                    if (isBreakList) {
-                        li.addEventListener('click', () => {
-                            if (confirm(`Return ${item.name} from break?`)) {
-                                returnFromBreak(item.id, item.name);
-                            }
-                        });
-                    }
-                    reportList.appendChild(li);
-                });
-            } else {
-                reportList.innerHTML = '<li>No one found.</li>';
-            }
-            reportModal.style.display = 'block';
-        }
-        
-        async function returnFromBreak(userId, userName) {
-            try {
-                const response = await fetch('/api/break/end', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: userId }),
-                });
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    showMessageModal('Error', `Error ending break for ${userName}: ${data.error}`, 'error');
-                } else {
-                    showMessageModal('Success', data.message, 'success');
-                }
-                reportModal.style.display = 'none';
-            } catch (error) {
-                console.error('Error returning from break:', error);
-                showMessageModal('Error', 'Could not return from break. Server error.', 'error');
-            }
-        }
-        
-        checkInOutButton.addEventListener('click', () => {
-            if (scannedUser.status === 'checked_out') {
-                performAction('check-in');
-            } else if (scannedUser.status === 'checked_in') {
-                performAction('check-out');
-            }
-        });
-
-        breakInOutButton.addEventListener('click', () => {
-            if (scannedUser.status === 'checked_in') {
-                performAction('break-start');
-            } else if (scannedUser.status === 'on_break') {
-                performAction('break-end');
-            }
-        });
-
-        cancelButton.addEventListener('click', () => {
-            setUIState('default');
-        });
-
-        onBreakButton.addEventListener('click', async () => {
-            const response = await fetch('/api/status/onbreak');
+    async function handleScanAndShowOptions(rfidCode) {
+        try {
+            const response = await fetch('/api/get-user-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rfid_code: rfidCode }),
+            });
             const data = await response.json();
-            showReportModal("Users on Break", data.users_on_break.map(u => u.name));
-        });
 
-        checkedInButton.addEventListener('click', async () => {
-            const response = await fetch('/api/status/checkedin');
+            if (!response.ok) {
+                showMessageModal('Error', data.error, 'error');
+            } else {
+                scannedRfidCode = rfidCode;
+                scannedUser = data.user;
+                setUIState('showOptions', data.user);
+                const certs = await fetchCertificationsForUser(data.user.id);
+                displayCertifications(certs);
+            }
+        } catch (error) {
+            console.error('Network or server error:', error);
+            showMessageModal('Error', 'Server Error. Please try again.', 'error');
+        }
+    }
+
+    function setUIState(state, user = null) {
+        if (state === 'default') {
+            scanner.textContent = 'Ready to scan...';
+            subheading.textContent = 'Scan your badge to get started';
+            defaultButtons.style.display = 'grid';
+            actionButtonsContainer.style.display = 'none';
+            certificationsSection.style.display = 'none';
+            scannedRfidCode = null;
+            scannedUser = null;
+        } else if (state === 'showOptions') {
+            scanner.textContent = `Hello, ${user.name}!`;
+            subheading.textContent = `What would you like to do?`;
+            defaultButtons.style.display = 'none';
+            actionButtonsContainer.style.display = 'grid';
+            certificationsSection.style.display = 'block';
+
+            if (user.status === 'checked_out') {
+                checkInOutButton.textContent = 'Check In';
+                checkInOutButton.style.display = 'block';
+                breakInOutButton.style.display = 'none';
+            } else if (user.status === 'checked_in') {
+                checkInOutButton.textContent = 'Check Out';
+                checkInOutButton.style.display = 'block';
+                breakInOutButton.textContent = 'Go on Break';
+                breakInOutButton.style.display = 'block';
+            } else if (user.status === 'on_break') {
+                checkInOutButton.style.display = 'none';
+                breakInOutButton.textContent = 'Return from Break';
+                breakInOutButton.style.display = 'block';
+            }
+        }
+    }
+
+    async function fetchCertificationsForUser(userId) {
+        try {
+            const response = await fetch(`/api/admin/users/${userId}/certifications`);
+            if (!response.ok) throw new Error('Failed to fetch certifications');
+            return await response.json();
+        } catch (error) {
+            console.error('Error fetching certifications:', error);
+            return [];
+        }
+    }
+
+    function displayCertifications(certifications) {
+        certificationsList.innerHTML = '';
+        if (certifications.length > 0) {
+            certifications.forEach(cert => {
+                const li = document.createElement('li');
+                li.classList.add('certification-tag');
+                li.textContent = cert.name;
+                certificationsList.appendChild(li);
+            });
+        } else {
+            certificationsList.innerHTML = '<li class="certification-tag">No certifications found.</li>';
+        }
+    }
+
+    async function performAction(actionType) {
+        if (!scannedRfidCode) return;
+
+        let endpoint, body;
+
+        if (actionType === 'check-in') {
+            endpoint = '/api/check-in';
+            body = { rfid_code: scannedRfidCode };
+        } else if (actionType === 'check-out') {
+            endpoint = '/api/check-out';
+            body = { rfid_code: scannedRfidCode };
+        } else if (actionType === 'break-start') {
+            endpoint = '/api/break/start';
+            body = { rfid_code: scannedRfidCode };
+        } else if (actionType === 'break-end') {
+            endpoint = '/api/break/end';
+            body = { user_id: scannedUser.id };
+        }
+
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
             const data = await response.json();
-            showReportModal("Users Checked In", data.users_checked_in);
-        });
-        
-        closeModalButton.addEventListener('click', () => {
+
+            if (!response.ok) {
+                showMessageModal('Error', data.error, 'error');
+            } else {
+                showMessageModal('Success', data.message, 'success');
+            }
+        } catch (error) {
+            console.error('Network or server error:', error);
+            showMessageModal('Error', 'Server Error. Please try again.', 'error');
+        }
+    }
+
+    function showMessageModal(title, text, type = 'success') {
+        messageTitle.textContent = title;
+        messageText.textContent = text;
+
+        messageModalContent.classList.remove('message-success', 'message-error', 'message-info');
+        messageModalContent.classList.add(`message-${type}`);
+
+        messageModal.style.display = 'flex';
+    }
+
+    function showReportModal(title, items, isBreakList = false) {
+        modalTitle.textContent = title;
+        reportList.innerHTML = '';
+
+        if (items.length > 0) {
+            items.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = item.name || item;
+                if (isBreakList) {
+                    li.addEventListener('click', () => {
+                        if (confirm(`Return ${item.name} from break?`)) {
+                            returnFromBreak(item.id, item.name);
+                        }
+                    });
+                }
+                reportList.appendChild(li);
+            });
+        } else {
+            reportList.innerHTML = '<li>No one found.</li>';
+        }
+        reportModal.style.display = 'block';
+    }
+
+    async function returnFromBreak(userId, userName) {
+        try {
+            const response = await fetch('/api/break/end', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId }),
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                showMessageModal('Error', `Error ending break for ${userName}: ${data.error}`, 'error');
+            } else {
+                showMessageModal('Success', data.message, 'success');
+            }
             reportModal.style.display = 'none';
-        });
+        } catch (error) {
+            console.error('Error returning from break:', error);
+            showMessageModal('Error', 'Could not return from break. Server error.', 'error');
+        }
+    }
 
-        messageOkButton.addEventListener('click', () => {
+    checkInOutButton.addEventListener('click', () => {
+        if (scannedUser.status === 'checked_out') {
+            performAction('check-in');
+        } else if (scannedUser.status === 'checked_in') {
+            performAction('check-out');
+        }
+    });
+
+    breakInOutButton.addEventListener('click', () => {
+        if (scannedUser.status === 'checked_in') {
+            performAction('break-start');
+        } else if (scannedUser.status === 'on_break') {
+            performAction('break-end');
+        }
+    });
+
+    cancelButton.addEventListener('click', () => {
+        setUIState('default');
+    });
+
+    onBreakButton.addEventListener('click', async () => {
+        const response = await fetch('/api/status/onbreak');
+        const data = await response.json();
+        showReportModal("Users on Break", data.users_on_break.map(u => u.name));
+    });
+
+    checkedInButton.addEventListener('click', async () => {
+        const response = await fetch('/api/status/checkedin');
+        const data = await response.json();
+        showReportModal("Users Checked In", data.users_checked_in);
+    });
+
+    closeModalButton.addEventListener('click', () => {
+        reportModal.style.display = 'none';
+    });
+
+    messageOkButton.addEventListener('click', () => {
+        messageModal.style.display = 'none';
+        setUIState('default');
+    });
+
+    window.onclick = function(event) {
+        if (event.target === reportModal) {
+            reportModal.style.display = 'none';
+        }
+        if (event.target === messageModal) {
             messageModal.style.display = 'none';
             setUIState('default');
-        });
+        }
+    };
 
-        window.onclick = function(event) {
-            if (event.target === reportModal) {
-                reportModal.style.display = 'none';
-            }
-            if (event.target === messageModal) {
-                messageModal.style.display = 'none';
-                setUIState('default');
-            }
-        };
-        
-        setUIState('default');
-    </script>
+    setUIState('default');
+</script>
 </body>
 </html>
