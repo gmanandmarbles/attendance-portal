@@ -102,9 +102,25 @@ app.post('/api/break/end', (req, res) => {
 // --- 7. FACE & PHOTO MANAGEMENT ---
 app.post('/api/admin/users/enroll-face', (req, res) => {
     const { userId, faceDescriptor } = req.body;
-    db.run('UPDATE users SET face_descriptor = ? WHERE id = ?', [faceDescriptor, userId], (err) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
+    
+    // First, get the existing descriptors
+    db.get('SELECT face_descriptor FROM users WHERE id = ?', [userId], (err, row) => {
+        let descriptors = [];
+        if (row && row.face_descriptor) {
+            descriptors = JSON.parse(row.face_descriptor);
+            // If it's an old single-string format, convert to array
+            if (!Array.isArray(descriptors)) descriptors = [descriptors];
+        }
+
+        // Add the new one (limit to 5 samples to keep it fast)
+        descriptors.push(JSON.parse(faceDescriptor));
+        if (descriptors.length > 5) descriptors.shift(); 
+
+        db.run('UPDATE users SET face_descriptor = ? WHERE id = ?', 
+            [JSON.stringify(descriptors), userId], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, count: descriptors.length });
+        });
     });
 });
 

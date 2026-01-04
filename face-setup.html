@@ -2,58 +2,108 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Face Enrollment</title>
+    <title>Face Enrollment Guide</title>
     <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
     <style>
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #0d1117; color: white; text-align: center; padding: 40px; }
-        .container { max-width: 500px; margin: auto; background: rgba(255,255,255,0.05); padding: 30px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.1); }
-        video { width: 100%; border-radius: 20px; background: #000; margin-bottom: 20px; }
-        select, button { width: 100%; padding: 15px; border-radius: 12px; margin: 10px 0; font-size: 1rem; }
-        button { background: #00D2FF; color: black; border: none; font-weight: bold; cursor: pointer; }
-        #status { color: #00FF85; font-weight: 600; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #0d1117; color: white; text-align: center; padding: 20px; }
+        .box { max-width: 500px; margin: auto; background: #161b22; padding: 30px; border-radius: 24px; border: 1px solid #30363d; }
+        video { width: 100%; border-radius: 15px; background: #000; border: 2px solid #30363d; }
+        .guide-box { margin: 15px 0; padding: 15px; background: rgba(0, 210, 255, 0.1); border-radius: 12px; border: 1px dashed #00D2FF; }
+        .progress-bar { height: 10px; background: #333; border-radius: 5px; margin: 10px 0; overflow: hidden; }
+        #progress-fill { width: 0%; height: 100%; background: #00FF85; transition: 0.3s; }
+        button { width: 100%; padding: 15px; background: #00FF85; color: #000; font-weight: bold; border-radius: 12px; border: none; cursor: pointer; font-size: 1rem; }
+        button:disabled { background: #333; color: #777; }
+        #log { font-family: monospace; font-size: 11px; color: #8b949e; margin-top: 15px; text-align: left; height: 60px; overflow-y: auto; }
+        select { width: 100%; padding: 12px; background: #0d1117; color: white; border: 1px solid #333; border-radius: 8px; margin-bottom: 15px; }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="box">
         <h2>Face Enrollment</h2>
+        <div class="guide-box">
+            <b id="guide-text">Step 1: Look straight at the camera</b>
+        </div>
+        
         <video id="video" playsinline autoplay muted></video>
-        <select id="userSelect"><option>Loading Users...</option></select>
-        <button id="capBtn" onclick="captureFace()">CAPTURE FACE</button>
-        <p id="status">Ready.</p>
-        <a href="/" style="color: white; opacity: 0.5;">Back to Kiosk</a>
+        
+        <div class="progress-bar"><div id="progress-fill"></div></div>
+        <p id="sample-count">Samples Captured: 0 / 5</p>
+
+        <select id="userSelect"></select>
+        <button id="capBtn" onclick="capture()">CAPTURE POSITION</button>
+        
+        <div id="log">> Initializing AI...</div>
     </div>
 
     <script>
-        const video = document.getElementById('video');
-        const status = document.getElementById('status');
+        let samples = 0;
+        const steps = [
+            "Look straight at the camera",
+            "Tilt head slightly LEFT",
+            "Tilt head slightly RIGHT",
+            "Look slightly UP",
+            "Look slightly DOWN"
+        ];
 
         async function init() {
-            await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
-            await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
-            await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
-            
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-            video.srcObject = stream;
-            
-            const res = await fetch('/api/users/all');
-            const users = await res.json();
-            document.getElementById('userSelect').innerHTML = users.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
+            try {
+                await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+                await faceapi.nets.faceLandmark68TinyNet.loadFromUri('/models');
+                await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+                document.getElementById('video').srcObject = stream;
+                
+                const res = await fetch('/api/users/all');
+                const users = await res.json();
+                document.getElementById('userSelect').innerHTML = users.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
+                document.getElementById('log').innerText = "> Ready for enrollment.";
+            } catch(e) {
+                document.getElementById('log').innerText = "> Error: " + e.message;
+            }
         }
 
-        async function captureFace() {
-            status.innerText = "Analyzing...";
-            const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+        async function capture() {
+            const btn = document.getElementById('capBtn');
+            const video = document.getElementById('video');
+            const logBox = document.getElementById('log');
+            btn.disabled = true;
 
-            if (!detection) return status.innerText = "No face detected!";
+            logBox.innerText = "> Analyzing face...";
+            const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks(true).withFaceDescriptor();
+
+            if (!detection) {
+                logBox.innerText = "> NO FACE DETECTED. Please center your face.";
+                btn.disabled = false;
+                return;
+            }
+
+            // CLEAN THE DATA: Convert Float32 to standard Number Array
+            const cleanDescriptor = Array.from(detection.descriptor).map(n => parseFloat(n));
 
             const userId = document.getElementById('userSelect').value;
-            await fetch('/api/admin/users/enroll-face', {
+            const res = await fetch('/api/admin/users/enroll-face', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId, faceDescriptor: JSON.stringify(Array.from(detection.descriptor)) })
+                body: JSON.stringify({ userId, faceDescriptor: JSON.stringify(cleanDescriptor) })
             });
-            status.innerText = "Face Enrolled Successfully!";
+
+            if (res.ok) {
+                samples++;
+                const percent = (samples / 5) * 100;
+                document.getElementById('progress-fill').style.width = percent + "%";
+                document.getElementById('sample-count').innerText = `Samples Captured: ${samples} / 5`;
+                
+                if (samples < 5) {
+                    document.getElementById('guide-text').innerText = `Step ${samples + 1}: ${steps[samples]}`;
+                    logBox.innerText = `> Angle ${samples} saved successfully.`;
+                    btn.disabled = false;
+                } else {
+                    document.getElementById('guide-text').innerText = "All Angles Saved!";
+                    logBox.innerText = "> User is now fully enrolled.";
+                    btn.innerText = "ENROLLMENT FINISHED";
+                }
+            }
         }
         window.onload = init;
     </script>
