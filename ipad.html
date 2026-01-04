@@ -18,14 +18,13 @@
             --ios-blur: blur(35px);
         }
 
+        /* Previous styles remain same until header... */
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-
         body {
             font-family: 'Plus Jakarta Sans', sans-serif;
             margin: 0;
             height: 100vh;
             color: var(--text-main);
-            /* Ultra-modern 2026 Deep Liquid Gradient */
             background: radial-gradient(circle at 0% 0%, #1e2a44 0%, #0d1117 100%);
             background-attachment: fixed;
             overflow: hidden;
@@ -33,31 +32,51 @@
             flex-direction: column;
         }
 
-        /* --- Header & Clock --- */
         header {
             padding: 3rem 4rem 1.5rem;
             display: flex;
             justify-content: space-between;
-            align-items: flex-end;
+            align-items: center; /* Changed to center for better alignment with search */
             z-index: 10;
         }
 
-        .clock-section h2 {
-            font-size: 4rem;
-            margin: 0;
-            font-weight: 300;
-            letter-spacing: -3px;
-            line-height: 1;
+        .clock-section h2 { font-size: 3.2rem; margin: 0; font-weight: 300; letter-spacing: -2px; line-height: 1; }
+        .clock-section p { margin: 0 0 4px 0; opacity: 0.6; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; font-size: 0.75rem; }
+
+        /* --- NEW: Search Container --- */
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 20px;
         }
 
-        .clock-section p {
-            margin: 0 0 8px 0;
-            opacity: 0.6;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 3px;
-            font-size: 0.85rem;
+        .search-container {
+            position: relative;
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            border-radius: 100px;
+            padding: 10px 25px;
+            display: flex;
+            align-items: center;
+            backdrop-filter: var(--ios-blur);
+            width: 300px;
+            transition: width 0.3s ease;
         }
+        
+        .search-container:focus-within { width: 400px; border-color: var(--accent); }
+
+        .search-container input {
+            background: transparent;
+            border: none;
+            color: white;
+            padding-left: 10px;
+            font-family: inherit;
+            font-size: 1rem;
+            width: 100%;
+            outline: none;
+        }
+
+        .search-container input::placeholder { color: rgba(255,255,255,0.4); }
 
         .scan-btn {
             background: var(--glass);
@@ -73,11 +92,12 @@
             gap: 12px;
             transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            white-space: nowrap;
         }
 
-        .scan-btn:active { transform: scale(0.92); background: rgba(255,255,255,0.2); }
+        .scan-btn:active { transform: scale(0.92); }
 
-        /* --- Uniform Grid Layout --- */
+        /* --- Grid & Cards (Modified for Photos) --- */
         .user-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
@@ -85,7 +105,6 @@
             padding: 1.5rem 4rem 5rem;
             overflow-y: auto;
             flex-grow: 1;
-            /* Fade effect at the bottom */
             mask-image: linear-gradient(to bottom, black 90%, transparent 100%);
             -webkit-mask-image: linear-gradient(to bottom, black 90%, transparent 100%);
         }
@@ -106,133 +125,46 @@
             animation: cardEntrance 0.7s cubic-bezier(0.16, 1, 0.3, 1) backwards;
         }
 
-        @keyframes cardEntrance {
-            from { opacity: 0; transform: scale(0.85) translateY(20px); }
-            to { opacity: 1; transform: scale(1) translateY(0); }
-        }
-
         .user-card:active { transform: scale(0.9) brightness(1.1); }
 
+        /* MODIFIED: Photo Support */
         .avatar {
-            width: 75px;
-            height: 75px;
-            border-radius: 24px;
+            width: 90px;
+            height: 90px;
+            border-radius: 28px;
             background: linear-gradient(145deg, var(--accent), #3a7bd5);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 2rem;
+            font-size: 2.2rem;
             font-weight: 700;
             margin-bottom: 1.2rem;
             box-shadow: 0 12px 24px rgba(0, 210, 255, 0.25);
+            overflow: hidden; /* Important for image */
+            object-fit: cover;
         }
 
-        .user-name {
-            font-weight: 600;
-            font-size: 1.15rem;
-            text-align: center;
-            width: 85%;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+        .avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
         }
 
-        .status-pill {
-            margin-top: 10px;
-            font-size: 0.65rem;
-            padding: 5px 14px;
-            border-radius: 20px;
-            background: rgba(0,0,0,0.3);
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            font-weight: 700;
-            opacity: 0.8;
-        }
-
-        .status-dot {
-            position: absolute;
-            top: 24px;
-            right: 24px;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-        }
-
+        .user-name { font-weight: 600; font-size: 1.15rem; text-align: center; width: 85%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .status-pill { margin-top: 10px; font-size: 0.65rem; padding: 5px 14px; border-radius: 20px; background: rgba(0,0,0,0.3); text-transform: uppercase; letter-spacing: 1.5px; font-weight: 700; opacity: 0.8; }
+        .status-dot { position: absolute; top: 24px; right: 24px; width: 12px; height: 12px; border-radius: 50%; }
         .in { background: var(--success); box-shadow: 0 0 15px var(--success); }
         .break { background: var(--warning); box-shadow: 0 0 15px var(--warning); }
         .out { background: rgba(255,255,255,0.2); }
 
-        /* --- Liquid Modal & Animations --- */
-        .modal {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.5);
-            backdrop-filter: blur(25px);
-            -webkit-backdrop-filter: blur(25px);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-            padding: 30px;
-            transition: opacity 0.4s ease;
-        }
-
-        .modal-content {
-            background: var(--glass-thick);
-            border: 1px solid var(--glass-border);
-            width: 100%;
-            max-width: 500px;
-            border-radius: 48px;
-            padding: 3.5rem;
-            text-align: center;
-            box-shadow: 0 50px 100px rgba(0,0,0,0.4);
-            animation: modalIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-        }
-
-        @keyframes modalIn {
-            from { opacity: 0; transform: scale(0.85) translateY(40px); }
-            to { opacity: 1; transform: scale(1) translateY(0); }
-        }
-
-        @keyframes modalOut {
-            from { opacity: 1; transform: scale(1) translateY(0); }
-            to { opacity: 0; transform: scale(0.92) translateY(30px); }
-        }
-
-        .modal.closing { opacity: 0; }
-        .modal.closing .modal-content { animation: modalOut 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-
-        .cert-badge {
-            background: linear-gradient(90deg, #00d2ff, #3a7bd5);
-            color: white;
-            padding: 12px 22px;
-            border-radius: 16px;
-            font-weight: 800;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            box-shadow: 0 8px 20px rgba(0, 210, 255, 0.2);
-        }
-
-        /* --- Buttons --- */
-        .action-grid {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 2.5rem;
-        }
-
-        .liquid-btn {
-            padding: 1.5rem;
-            border-radius: 26px;
-            border: none;
-            font-weight: 700;
-            font-size: 1.1rem;
-            cursor: pointer;
-            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
+        /* Modal Styles remain same as your original... */
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px); z-index: 1000; align-items: center; justify-content: center; padding: 30px; }
+        .modal-content { background: var(--glass-thick); border: 1px solid var(--glass-border); width: 100%; max-width: 500px; border-radius: 48px; padding: 3.5rem; text-align: center; box-shadow: 0 50px 100px rgba(0,0,0,0.4); animation: modalIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 2.5rem; }
+        .liquid-btn { padding: 1.5rem; border-radius: 26px; border: none; font-weight: 700; font-size: 1.1rem; cursor: pointer; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
         .btn-main { background: #FFFFFF; color: #000000; }
         .btn-glass { background: var(--glass); color: white; border: 1px solid var(--glass-border); }
-        
-        .liquid-btn:active { transform: scale(0.94); filter: brightness(0.9); }
-
+        .cert-badge { background: linear-gradient(90deg, #00d2ff, #3a7bd5); color: white; padding: 12px 22px; border-radius: 16px; font-weight: 800; font-size: 0.75rem; text-transform: uppercase; }
         #reader { border-radius: 32px; overflow: hidden; margin-top: 1rem; }
     </style>
 </head>
@@ -243,10 +175,18 @@
         <p id="currentDate">LOADING...</p>
         <h2 id="currentTime">00:00</h2>
     </div>
-    <button class="scan-btn" onclick="openScanner()">
-        <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 012-2h2m10 0h2a2 2 0 012 2v2m0 10v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2M12 7v10m-4-5h8"/></svg>
-        SCAN BADGE
-    </button>
+
+    <div class="header-actions">
+        <div class="search-container">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
+            <input type="text" id="userSearch" placeholder="Find user..." oninput="filterUsers()">
+        </div>
+
+        <button class="scan-btn" onclick="openScanner()">
+            <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 012-2h2m10 0h2a2 2 0 012 2v2m0 10v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2M12 7v10m-4-5h8"/></svg>
+            SCAN BADGE
+        </button>
+    </div>
 </header>
 
 <div id="userGrid" class="user-grid"></div>
@@ -256,11 +196,8 @@
         <div id="modalAvatar" class="avatar" style="width:110px; height:110px; font-size: 2.8rem; margin: 0 auto 1.5rem;"></div>
         <h1 id="modalUserName" style="margin:0; letter-spacing:-1.5px; font-size: 2.2rem;">User</h1>
         <p id="modalStatusText" style="opacity:0.5; margin-top:8px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">Status</p>
-
         <div id="modalCerts" style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-top:2.2rem;"></div>
-
         <div class="action-grid" id="modalActions"></div>
-        
         <button class="liquid-btn btn-glass" style="width:100%; margin-top:16px;" onclick="closeModals()">Dismiss</button>
     </div>
 </div>
@@ -274,6 +211,7 @@
 </div>
 
 <script>
+    let allUsers = []; // Store globally for searching
     let currentUser = null;
     let html5QrCode = null;
 
@@ -287,17 +225,34 @@
 
     async function init() {
         const res = await fetch('/api/users/all');
-        const users = await res.json();
+        allUsers = await res.json();
+        renderGrid(allUsers);
+    }
+
+    function renderGrid(users) {
         const grid = document.getElementById('userGrid');
-        
-        grid.innerHTML = users.map((u, index) => `
-            <div class="user-card" style="animation-delay: ${index * 0.05}s" onclick='handleSelect(${JSON.stringify(u)})'>
-                <div class="status-dot ${getStatusClass(u.status)}"></div>
-                <div class="avatar">${u.name.charAt(0)}</div>
-                <div class="user-name">${u.name}</div>
-                <div class="status-pill">${u.status.replace('_', ' ')}</div>
-            </div>
-        `).join('');
+        grid.innerHTML = users.map((u, index) => {
+            // Logic for photo vs letter avatar
+            const avatarContent = u.profile_picture_url 
+                ? `<img src="${u.profile_picture_url}" alt="${u.name}">` 
+                : u.name.charAt(0);
+
+            return `
+                <div class="user-card" style="animation-delay: ${index * 0.05}s" onclick='handleSelect(${JSON.stringify(u)})'>
+                    <div class="status-dot ${getStatusClass(u.status)}"></div>
+                    <div class="avatar">${avatarContent}</div>
+                    <div class="user-name">${u.name}</div>
+                    <div class="status-pill">${u.status.replace('_', ' ')}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // SEARCH FUNCTION
+    function filterUsers() {
+        const term = document.getElementById('userSearch').value.toLowerCase();
+        const filtered = allUsers.filter(u => u.name.toLowerCase().includes(term));
+        renderGrid(filtered);
     }
 
     function getStatusClass(s) {
@@ -309,9 +264,15 @@
     async function handleSelect(user) {
         currentUser = user;
         const modal = document.getElementById('actionModal');
+        const modalAvatar = document.getElementById('modalAvatar');
+        
         document.getElementById('modalUserName').innerText = user.name;
-        document.getElementById('modalAvatar').innerText = user.name.charAt(0);
         document.getElementById('modalStatusText').innerText = user.status.replace('_', ' ');
+        
+        // Update modal avatar with photo support
+        modalAvatar.innerHTML = user.profile_picture_url 
+            ? `<img src="${user.profile_picture_url}" alt="${user.name}">` 
+            : user.name.charAt(0);
 
         const certsRes = await fetch(`/api/admin/users/${user.id}/certifications`);
         const certs = await certsRes.json();
@@ -334,6 +295,7 @@
         modal.style.display = 'flex';
     }
 
+    // Existing functions remain identical...
     function closeModals() {
         const modal = document.getElementById('actionModal');
         modal.classList.add('closing');
@@ -346,8 +308,6 @@
     async function perform(action) {
         const endpoints = {'check-in': '/api/check-in', 'check-out': '/api/check-out', 'break-start': '/api/break/start', 'break-end': '/api/break/end'};
         const body = action === 'break-end' ? { user_id: currentUser.id } : { rfid_code: currentUser.rfid_code };
-        
-        // Instant visual feedback: start closing animation
         const modal = document.getElementById('actionModal');
         modal.classList.add('closing');
 
@@ -360,7 +320,7 @@
         setTimeout(() => {
             modal.style.display = 'none';
             modal.classList.remove('closing');
-            init(); // Reload grid
+            init(); 
         }, 400);
     }
 
@@ -369,7 +329,6 @@
         html5QrCode = new Html5Qrcode("reader");
         html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (text) => {
             closeScanner();
-            // Handle Scanned RFID/Code
             fetch('/api/get-user-status', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},

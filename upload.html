@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload Profile Photo</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; max-width: 500px; margin: auto; }
+        .card { border: 1px solid #ccc; padding: 20px; border-radius: 8px; }
+        select, input, button { width: 100%; padding: 10px; margin: 10px 0; }
+        button { background: #007bff; color: white; border: none; cursor: pointer; }
+        #preview { width: 150px; height: 150px; border: 2px dashed #ccc; display: block; margin: 10px auto; object-fit: cover; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Update Profile Photo</h2>
+        
+        <label>Select User:</label>
+        <select id="userSelect">
+            <option value="">-- Choose a User --</option>
+        </select>
+
+        <label>Or Enter User ID:</label>
+        <input type="number" id="userIdInput" placeholder="User ID">
+
+        <label>Choose Photo:</label>
+        <input type="file" id="photoInput" accept="image/*">
+        <img id="preview" src="" alt="Preview">
+
+        <button onclick="uploadPhoto()">Upload & Save</button>
+        <p id="status"></p>
+        <a href="/admin">Back to Admin</a>
+    </div>
+
+    <script>
+        // Load users for the dropdown
+        fetch('/api/admin/users')
+            .then(res => res.json())
+            .then(users => {
+                const select = document.getElementById('userSelect');
+                users.forEach(u => {
+                    const opt = document.createElement('option');
+                    opt.value = u.id;
+                    opt.textContent = `${u.name} (ID: ${u.id})`;
+                    select.appendChild(opt);
+                });
+            });
+
+        // Update ID input when dropdown changes
+        document.getElementById('userSelect').onchange = (e) => {
+            document.getElementById('userIdInput').value = e.target.value;
+        };
+
+        // Preview image
+        document.getElementById('photoInput').onchange = (e) => {
+            const [file] = e.target.files;
+            if (file) document.getElementById('preview').src = URL.createObjectURL(file);
+        };
+
+        async function uploadPhoto() {
+            const userId = document.getElementById('userIdInput').value;
+            const fileInput = document.getElementById('photoInput');
+            const status = document.getElementById('status');
+
+            if (!userId || !fileInput.files[0]) {
+                alert("Please select a user and a file!");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('userId', userId);
+            formData.append('photo', fileInput.files[0]);
+
+            status.innerText = "Uploading...";
+
+            const res = await fetch('/api/admin/users/upload-photo', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (res.ok) {
+                status.innerText = "Success! Photo updated.";
+                status.style.color = "green";
+            } else {
+                status.innerText = "Upload failed.";
+                status.style.color = "red";
+            }
+        }
+    </script>
+</body>
+</html>
