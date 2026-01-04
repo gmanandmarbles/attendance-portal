@@ -1,8 +1,21 @@
-node_modules
-build
-npm-debug.log
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Environment & OS
 .env
 .DS_Store
-attendance.db
-attendance.db
+Thumbs.db
 
+# Reports/Logs
+*.csv
+*.pdf
+logs/
+*.db
+attendance.db

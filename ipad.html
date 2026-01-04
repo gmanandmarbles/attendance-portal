@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>9449 Kiosk | Liquid Glass</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        :root {
+            --glass: rgba(255, 255, 255, 0.1);
+            --glass-thick: rgba(255, 255, 255, 0.18);
+            --glass-border: rgba(255, 255, 255, 0.25);
+            --text-main: #FFFFFF;
+            --accent: #00D2FF;
+            --success: #00FF85;
+            --warning: #FFBD2E;
+            --ios-blur: blur(35px);
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            margin: 0;
+            height: 100vh;
+            color: var(--text-main);
+            /* Ultra-modern 2026 Deep Liquid Gradient */
+            background: radial-gradient(circle at 0% 0%, #1e2a44 0%, #0d1117 100%);
+            background-attachment: fixed;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- Header & Clock --- */
+        header {
+            padding: 3rem 4rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            z-index: 10;
+        }
+
+        .clock-section h2 {
+            font-size: 4rem;
+            margin: 0;
+            font-weight: 300;
+            letter-spacing: -3px;
+            line-height: 1;
+        }
+
+        .clock-section p {
+            margin: 0 0 8px 0;
+            opacity: 0.6;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            font-size: 0.85rem;
+        }
+
+        .scan-btn {
+            background: var(--glass);
+            backdrop-filter: var(--ios-blur);
+            -webkit-backdrop-filter: var(--ios-blur);
+            border: 1px solid var(--glass-border);
+            color: white;
+            padding: 1.2rem 2.2rem;
+            border-radius: 100px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .scan-btn:active { transform: scale(0.92); background: rgba(255,255,255,0.2); }
+
+        /* --- Uniform Grid Layout --- */
+        .user-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+            gap: 2rem;
+            padding: 1.5rem 4rem 5rem;
+            overflow-y: auto;
+            flex-grow: 1;
+            /* Fade effect at the bottom */
+            mask-image: linear-gradient(to bottom, black 90%, transparent 100%);
+            -webkit-mask-image: linear-gradient(to bottom, black 90%, transparent 100%);
+        }
+
+        .user-card {
+            aspect-ratio: 1 / 1.1;
+            background: var(--glass);
+            backdrop-filter: var(--ios-blur);
+            -webkit-backdrop-filter: var(--ios-blur);
+            border: 1px solid var(--glass-border);
+            border-radius: 36px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            animation: cardEntrance 0.7s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+        }
+
+        @keyframes cardEntrance {
+            from { opacity: 0; transform: scale(0.85) translateY(20px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .user-card:active { transform: scale(0.9) brightness(1.1); }
+
+        .avatar {
+            width: 75px;
+            height: 75px;
+            border-radius: 24px;
+            background: linear-gradient(145deg, var(--accent), #3a7bd5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 1.2rem;
+            box-shadow: 0 12px 24px rgba(0, 210, 255, 0.25);
+        }
+
+        .user-name {
+            font-weight: 600;
+            font-size: 1.15rem;
+            text-align: center;
+            width: 85%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .status-pill {
+            margin-top: 10px;
+            font-size: 0.65rem;
+            padding: 5px 14px;
+            border-radius: 20px;
+            background: rgba(0,0,0,0.3);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: 700;
+            opacity: 0.8;
+        }
+
+        .status-dot {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .in { background: var(--success); box-shadow: 0 0 15px var(--success); }
+        .break { background: var(--warning); box-shadow: 0 0 15px var(--warning); }
+        .out { background: rgba(255,255,255,0.2); }
+
+        /* --- Liquid Modal & Animations --- */
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 30px;
+            transition: opacity 0.4s ease;
+        }
+
+        .modal-content {
+            background: var(--glass-thick);
+            border: 1px solid var(--glass-border);
+            width: 100%;
+            max-width: 500px;
+            border-radius: 48px;
+            padding: 3.5rem;
+            text-align: center;
+            box-shadow: 0 50px 100px rgba(0,0,0,0.4);
+            animation: modalIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes modalIn {
+            from { opacity: 0; transform: scale(0.85) translateY(40px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        @keyframes modalOut {
+            from { opacity: 1; transform: scale(1) translateY(0); }
+            to { opacity: 0; transform: scale(0.92) translateY(30px); }
+        }
+
+        .modal.closing { opacity: 0; }
+        .modal.closing .modal-content { animation: modalOut 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+        .cert-badge {
+            background: linear-gradient(90deg, #00d2ff, #3a7bd5);
+            color: white;
+            padding: 12px 22px;
+            border-radius: 16px;
+            font-weight: 800;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            box-shadow: 0 8px 20px rgba(0, 210, 255, 0.2);
+        }
+
+        /* --- Buttons --- */
+        .action-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 2.5rem;
+        }
+
+        .liquid-btn {
+            padding: 1.5rem;
+            border-radius: 26px;
+            border: none;
+            font-weight: 700;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .btn-main { background: #FFFFFF; color: #000000; }
+        .btn-glass { background: var(--glass); color: white; border: 1px solid var(--glass-border); }
+        
+        .liquid-btn:active { transform: scale(0.94); filter: brightness(0.9); }
+
+        #reader { border-radius: 32px; overflow: hidden; margin-top: 1rem; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="clock-section">
+        <p id="currentDate">LOADING...</p>
+        <h2 id="currentTime">00:00</h2>
+    </div>
+    <button class="scan-btn" onclick="openScanner()">
+        <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 012-2h2m10 0h2a2 2 0 012 2v2m0 10v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2M12 7v10m-4-5h8"/></svg>
+        SCAN BADGE
+    </button>
+</header>
+
+<div id="userGrid" class="user-grid"></div>
+
+<div id="actionModal" class="modal">
+    <div class="modal-content">
+        <div id="modalAvatar" class="avatar" style="width:110px; height:110px; font-size: 2.8rem; margin: 0 auto 1.5rem;"></div>
+        <h1 id="modalUserName" style="margin:0; letter-spacing:-1.5px; font-size: 2.2rem;">User</h1>
+        <p id="modalStatusText" style="opacity:0.5; margin-top:8px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">Status</p>
+
+        <div id="modalCerts" style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-top:2.2rem;"></div>
+
+        <div class="action-grid" id="modalActions"></div>
+        
+        <button class="liquid-btn btn-glass" style="width:100%; margin-top:16px;" onclick="closeModals()">Dismiss</button>
+    </div>
+</div>
+
+<div id="cameraModal" class="modal">
+    <div class="modal-content">
+        <h2 style="margin-top:0">Scan Barcode</h2>
+        <div id="reader"></div>
+        <button class="liquid-btn btn-glass" style="width:100%; margin-top:20px;" onclick="closeScanner()">Cancel</button>
+    </div>
+</div>
+
+<script>
+    let currentUser = null;
+    let html5QrCode = null;
+
+    function updateClock() {
+        const now = new Date();
+        document.getElementById('currentTime').innerText = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+        document.getElementById('currentDate').innerText = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    async function init() {
+        const res = await fetch('/api/users/all');
+        const users = await res.json();
+        const grid = document.getElementById('userGrid');
+        
+        grid.innerHTML = users.map((u, index) => `
+            <div class="user-card" style="animation-delay: ${index * 0.05}s" onclick='handleSelect(${JSON.stringify(u)})'>
+                <div class="status-dot ${getStatusClass(u.status)}"></div>
+                <div class="avatar">${u.name.charAt(0)}</div>
+                <div class="user-name">${u.name}</div>
+                <div class="status-pill">${u.status.replace('_', ' ')}</div>
+            </div>
+        `).join('');
+    }
+
+    function getStatusClass(s) {
+        if(s === 'checked_in') return 'in';
+        if(s === 'on_break') return 'break';
+        return 'out';
+    }
+
+    async function handleSelect(user) {
+        currentUser = user;
+        const modal = document.getElementById('actionModal');
+        document.getElementById('modalUserName').innerText = user.name;
+        document.getElementById('modalAvatar').innerText = user.name.charAt(0);
+        document.getElementById('modalStatusText').innerText = user.status.replace('_', ' ');
+
+        const certsRes = await fetch(`/api/admin/users/${user.id}/certifications`);
+        const certs = await certsRes.json();
+        document.getElementById('modalCerts').innerHTML = certs.map(c => `<span class="cert-badge">${c.name}</span>`).join('');
+
+        const actions = document.getElementById('modalActions');
+        actions.innerHTML = '';
+        
+        if (user.status === 'checked_out') {
+            actions.innerHTML = `<button class="liquid-btn btn-main" style="grid-column: span 2" onclick="perform('check-in')">Check In</button>`;
+        } else if (user.status === 'checked_in') {
+            actions.innerHTML = `
+                <button class="liquid-btn btn-main" onclick="perform('check-out')">Check Out</button>
+                <button class="liquid-btn btn-glass" onclick="perform('break-start')">Break</button>
+            `;
+        } else if (user.status === 'on_break') {
+            actions.innerHTML = `<button class="liquid-btn btn-main" style="grid-column: span 2" onclick="perform('break-end')">Resume Work</button>`;
+        }
+
+        modal.style.display = 'flex';
+    }
+
+    function closeModals() {
+        const modal = document.getElementById('actionModal');
+        modal.classList.add('closing');
+        setTimeout(() => {
+            modal.style.display = 'none';
+            modal.classList.remove('closing');
+        }, 400);
+    }
+
+    async function perform(action) {
+        const endpoints = {'check-in': '/api/check-in', 'check-out': '/api/check-out', 'break-start': '/api/break/start', 'break-end': '/api/break/end'};
+        const body = action === 'break-end' ? { user_id: currentUser.id } : { rfid_code: currentUser.rfid_code };
+        
+        // Instant visual feedback: start closing animation
+        const modal = document.getElementById('actionModal');
+        modal.classList.add('closing');
+
+        await fetch(endpoints[action], {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        
+        setTimeout(() => {
+            modal.style.display = 'none';
+            modal.classList.remove('closing');
+            init(); // Reload grid
+        }, 400);
+    }
+
+    function openScanner() {
+        document.getElementById('cameraModal').style.display = 'flex';
+        html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (text) => {
+            closeScanner();
+            // Handle Scanned RFID/Code
+            fetch('/api/get-user-status', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ rfid_code: text })
+            }).then(res => res.json()).then(data => handleSelect(data.user));
+        });
+    }
+
+    function closeScanner() {
+        if(html5QrCode) html5QrCode.stop();
+        document.getElementById('cameraModal').style.display = 'none';
+    }
+
+    window.onload = init;
+</script>
+</body>
+</html>
