@@ -6,31 +6,67 @@
     <title>9449 Kiosk</title>
     <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
     <style>
-        :root { --glass: rgba(255, 255, 255, 0.1); --accent: #00D2FF; --success: #00FF85; }
-        body { font-family: sans-serif; margin: 0; background: #0d1117; color: white; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-        header { padding: 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
-        
-        /* User Grid */
-        .user-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 15px; padding: 20px; overflow-y: auto; flex-grow: 1; }
-        .user-card { background: var(--glass); border-radius: 20px; padding: 15px; text-align: center; border: 1px solid rgba(255,255,255,0.1); position: relative; }
-        .avatar { width: 60px; height: 60px; border-radius: 50%; background: #333; margin: 0 auto 10px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; overflow: hidden; }
+        :root { --glass: rgba(255, 255, 255, 0.1); --accent: #00D2FF; --success: #00FF85; --danger: #ff4d4d; }
+        * { touch-action: manipulation; box-sizing: border-box; }
+
+        body { 
+            font-family: sans-serif; margin: 0; background: #0d1117; color: white; 
+            height: 100vh; display: flex; flex-direction: column; overflow: hidden; 
+        }
+
+        header { 
+            padding: 20px; display: flex; justify-content: space-between; 
+            align-items: center; border-bottom: 1px solid #333; gap: 15px;
+        }
+
+        /* Search Bar with Clear Button */
+        .search-container { position: relative; flex-grow: 1; max-width: 500px; }
+        #userSearch {
+            width: 100%; padding: 15px 45px 15px 20px; border-radius: 30px;
+            border: 1px solid #444; background: #1c2128; color: white; font-size: 1.1rem;
+        }
+        .clear-btn {
+            position: absolute; right: 15px; top: 50%; transform: translateY(-50%);
+            background: #444; color: white; border: none; border-radius: 50%;
+            width: 24px; height: 24px; cursor: pointer; display: none; align-items: center; justify-content: center;
+        }
+
+        /* 3-Column Grid with Larger Boxes */
+        .user-grid { 
+            display: grid; grid-template-columns: repeat(3, 1fr); 
+            gap: 25px; padding: 25px; overflow-y: auto; flex-grow: 1; 
+        }
+
+        .user-card { 
+            background: var(--glass); border-radius: 30px; padding: 40px 20px;
+            text-align: center; border: 1px solid rgba(255,255,255,0.1); 
+            position: relative; transition: all 0.2s;
+        }
+        .user-card:active { transform: scale(0.96); background: rgba(255,255,255,0.15); }
+
+        /* Larger Images */
+        .avatar { 
+            width: 140px; height: 140px; border-radius: 50%; 
+            background: #333; margin: 0 auto 20px; display: flex; 
+            align-items: center; justify-content: center; font-size: 3rem; overflow: hidden; 
+            border: 4px solid #222;
+        }
         .avatar img { width: 100%; height: 100%; object-fit: cover; }
-        .status-dot { position: absolute; top: 15px; right: 15px; width: 10px; height: 10px; border-radius: 50%; }
-        .online { background: var(--success); box-shadow: 0 0 8px var(--success); }
+
+        .status-dot { position: absolute; top: 25px; right: 25px; width: 18px; height: 18px; border-radius: 50%; }
+        .online { background: var(--success); box-shadow: 0 0 10px var(--success); }
         .offline { background: #555; }
 
-        /* Scanner Overlay */
+        /* Scanner */
         #scanner-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 100; flex-direction: column; align-items: center; justify-content: center; backdrop-filter: blur(10px); }
-        video { width: 320px; height: 400px; object-fit: cover; border-radius: 30px; border: 2px solid var(--accent); }
-        .log-box { width: 320px; height: 80px; background: #000; font-family: monospace; font-size: 10px; color: var(--success); padding: 10px; margin: 15px 0; overflow-y: auto; border-radius: 10px; }
+        video { width: 350px; height: 450px; object-fit: cover; border-radius: 30px; border: 2px solid var(--accent); }
+        .log-box { width: 350px; height: 100px; background: #000; font-family: monospace; font-size: 12px; color: var(--success); padding: 12px; margin: 15px 0; overflow-y: auto; border-radius: 10px; border: 1px solid #333; }
 
-        /* Modals */
         .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; align-items: center; justify-content: center; }
-        .modal-content { background: #1c2128; padding: 30px; border-radius: 25px; width: 300px; text-align: center; border: 1px solid #444; }
+        .modal-content { background: #1c2128; padding: 30px; border-radius: 25px; width: 320px; text-align: center; border: 1px solid #444; }
         .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
-        button { padding: 12px; border-radius: 10px; border: none; font-weight: bold; cursor: pointer; }
-        .btn-primary { background: white; color: black; }
-        .btn-cancel { background: #333; color: white; }
+        button { padding: 15px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: white; color: black; font-size: 1rem; }
     </style>
 </head>
 <body>
@@ -40,25 +76,33 @@
         <h1 id="time" style="margin:0">00:00</h1>
         <div id="aiStatus" style="font-size: 0.7rem; color: #777;">AI INITIALIZING...</div>
     </div>
-    <button id="loginBtn" onclick="openScanner()" disabled style="background:var(--accent); color:black; border-radius:50px; padding:10px 20px; font-weight:800;">FACE LOGIN</button>
+
+    <div class="search-container">
+        <input type="text" id="userSearch" placeholder="Search people..." oninput="filterUsers()">
+        <button id="clearSearch" class="clear-btn" onclick="clearSearch()">✕</button>
+    </div>
+
+    <button id="loginBtn" onclick="openScanner()" disabled style="background:var(--accent); color:black; border-radius:50px; padding:15px 25px; font-weight:800;">FACE LOGIN</button>
 </header>
 
 <div class="user-grid" id="userGrid"></div>
 
 <div id="scanner-overlay">
-    <h2>Align Face</h2>
+    <h2 id="scanMsg">Align Face</h2>
     <video id="faceVideo" playsinline autoplay muted></video>
     <div class="log-box" id="log">> Camera standby...</div>
-    <button id="scanBtn" onclick="runCapture()" style="width:320px; background:var(--accent); height:50px;">CAPTURE SCAN</button>
-    <button onclick="closeScanner()" style="background:none; color:white; margin-top:10px; opacity:0.5;">Close</button>
+    <div style="display:flex; gap:10px;">
+        <button id="scanBtn" onclick="runCapture()" style="width:260px; background:var(--accent); color:black;">CAPTURE SCAN</button>
+        <button onclick="closeScanner()" style="background:#333; color:white; width:80px;">Exit</button>
+    </div>
 </div>
 
 <div id="actionModal" class="modal">
     <div class="modal-content">
-        <div id="mAvatar" class="avatar" style="width:80px; height:80px"></div>
+        <div id="mAvatar" class="avatar" style="width:100px; height:100px"></div>
         <h2 id="mName" style="margin:10px 0">User Name</h2>
         <div class="btn-row" id="mActions"></div>
-        <button onclick="closeModal()" class="btn-cancel" style="width:100%; margin-top:10px;">Close</button>
+        <button onclick="closeModal()" style="background:#333; color:white; width:100%; margin-top:15px;">Close</button>
     </div>
 </div>
 
@@ -67,12 +111,12 @@
     let faceStream = null;
 
     async function init() {
-        // 1. Fetch Users
-        const res = await fetch('/api/users/all');
-        allUsers = await res.json();
-        renderGrid(allUsers);
+        try {
+            const res = await fetch('/api/users/all');
+            allUsers = await res.json();
+            renderGrid(allUsers);
+        } catch(e) { console.error("API error"); }
 
-        // 2. Pre-Load AI (Memory Persistent)
         try {
             await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
             await faceapi.nets.faceLandmark68TinyNet.loadFromUri('/models');
@@ -81,7 +125,24 @@
             document.getElementById('loginBtn').disabled = false;
         } catch(e) { document.getElementById('aiStatus').innerText = "AI OFFLINE"; }
         
-        setInterval(() => { document.getElementById('time').innerText = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); }, 1000);
+        setInterval(() => { 
+            document.getElementById('time').innerText = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); 
+        }, 1000);
+    }
+
+    function filterUsers() {
+        const input = document.getElementById('userSearch');
+        const query = input.value.toLowerCase();
+        document.getElementById('clearSearch').style.display = query ? 'flex' : 'none';
+        const filtered = allUsers.filter(u => u.name.toLowerCase().includes(query));
+        renderGrid(filtered);
+    }
+
+    function clearSearch() {
+        const input = document.getElementById('userSearch');
+        input.value = '';
+        filterUsers();
+        input.focus();
     }
 
     function renderGrid(users) {
@@ -89,32 +150,43 @@
             <div class="user-card" onclick='handleSelect(${JSON.stringify(u)})'>
                 <div class="status-dot ${u.status === 'checked_in' ? 'online' : 'offline'}"></div>
                 <div class="avatar">${u.profile_picture_url ? `<img src="${u.profile_picture_url}">` : u.name[0]}</div>
-                <div style="font-size:0.85rem; font-weight:600;">${u.name}</div>
+                <div style="font-size:1.2rem; font-weight:700; letter-spacing:0.5px;">${u.name}</div>
             </div>
         `).join('');
     }
 
     async function openScanner() {
         document.getElementById('scanner-overlay').style.display = 'flex';
+        document.getElementById('scanMsg').innerText = "Align Face";
+        document.getElementById('scanMsg').style.color = "white";
         faceStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
         document.getElementById('faceVideo').srcObject = faceStream;
     }
 
     async function runCapture() {
         const btn = document.getElementById('scanBtn');
+        const msg = document.getElementById('scanMsg');
         btn.disabled = true;
-        const log = (m) => document.getElementById('log').innerHTML += `<div>> ${m}</div>`;
+        const logEl = document.getElementById('log');
+        const log = (m) => logEl.innerHTML += `<div>> ${m}</div>`;
+        logEl.scrollTop = logEl.scrollHeight;
         
         log("Analyzing...");
         const detection = await faceapi.detectSingleFace(document.getElementById('faceVideo'), new faceapi.TinyFaceDetectorOptions({ inputSize: 224 })).withFaceLandmarks(true).withFaceDescriptor();
 
         if (!detection) {
-            log("No face found.");
-            btn.disabled = false;
+            log("<span style='color:red'>No face found. Try again...</span>");
+            msg.innerText = "NO FACE DETECTED";
+            msg.style.color = "var(--danger)";
+            // Reset logic: Re-enable button after 1.5 seconds so user can try again immediately
+            setTimeout(() => { 
+                btn.disabled = false; 
+                msg.innerText = "Align Face";
+                msg.style.color = "white";
+            }, 1500);
             return;
         }
 
-        // BIOMETRIC MATCHING (Bulletproofed)
         const labeled = allUsers
             .filter(u => u.face_descriptor && u.face_descriptor !== "null")
             .map(u => {
@@ -126,16 +198,23 @@
                 } catch(e) { return null; }
             }).filter(v => v !== null);
 
-        if (labeled.length === 0) { log("No profiles loaded."); btn.disabled = false; return; }
+        if (labeled.length === 0) { log("No profiles in DB."); btn.disabled = false; return; }
 
         const match = new faceapi.FaceMatcher(labeled, 0.6).findBestMatch(detection.descriptor);
+        
         if (match.label !== 'unknown') {
             const user = allUsers.find(u => u.id == match.label);
             closeScanner();
             handleSelect(user);
         } else {
-            log("Unknown User.");
-            btn.disabled = false;
+            log("<span style='color:red'>Unknown User.</span>");
+            msg.innerText = "MATCH FAILED";
+            msg.style.color = "var(--danger)";
+            setTimeout(() => { 
+                btn.disabled = false; 
+                msg.innerText = "Align Face";
+                msg.style.color = "white";
+            }, 1500);
         }
     }
 
@@ -155,7 +234,11 @@
         location.reload();
     }
 
-    function closeScanner() { if(faceStream) faceStream.getTracks().forEach(t => t.stop()); document.getElementById('scanner-overlay').style.display = 'none'; }
+    function closeScanner() { 
+        if(faceStream) faceStream.getTracks().forEach(t => t.stop()); 
+        document.getElementById('scanner-overlay').style.display = 'none'; 
+        document.getElementById('scanBtn').disabled = false;
+    }
     function closeModal() { document.getElementById('actionModal').style.display = 'none'; }
     window.onload = init;
 </script>
