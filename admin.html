@@ -188,6 +188,10 @@
             <form id="createUserForm">
                 <input type="text" id="userName" placeholder="User Name" required>
                 <input type="text" id="rfidCode" placeholder="RFID Code" required>
+                <label style="display:flex; align-items:center; gap:6px; white-space:nowrap;">
+                    <input type="checkbox" id="isKeyholder">
+                    Keyholder
+                </label>
                 <button type="submit">Create User</button>
             </form>
             <p id="userMessage" class="message"></p>
@@ -198,6 +202,9 @@
                         <th>ID</th>
                         <th>Name</th>
                         <th>RFID Code</th>
+                        <th>Keyholder</th>
+                        <th>Today Hours</th>
+                        <th>Total Hours</th>
                         <th>Status</th>
                         <th>Actions</th>
                     </tr>
@@ -271,6 +278,7 @@
         const reportDateInput = document.getElementById('reportDate');
         const downloadCsvButton = document.getElementById('downloadCsvButton');
         const downloadPdfButton = document.getElementById('downloadPdfButton');
+        const isKeyholderInput = document.getElementById('isKeyholder');
         
         // Certifications
         const certsTableBody = document.querySelector('#certificationsTable tbody');
@@ -285,6 +293,15 @@
 
         reportDateInput.value = new Date().toISOString().split('T')[0];
 
+        function formatMinutes(minutes) {
+            const total = Number(minutes) || 0;
+            const hours = Math.floor(total / 60);
+            const mins = total % 60;
+            if (hours === 0) return `${mins}m`;
+            if (mins === 0) return `${hours}h`;
+            return `${hours}h ${mins}m`;
+        }
+
         async function fetchUsers() {
             try {
                 const response = await fetch('/api/admin/users');
@@ -296,6 +313,11 @@
                             <td>${user.id}</td>
                             <td>${user.name}</td>
                             <td>${user.rfid_code}</td>
+                            <td>
+                                <input type="checkbox" ${user.is_keyholder ? 'checked' : ''} onchange="toggleKeyholder(${user.id}, this.checked)">
+                            </td>
+                            <td>${formatMinutes(user.today_minutes)}</td>
+                            <td>${formatMinutes(user.total_minutes)}</td>
                             <td>${user.status}</td>
                             <td>
                                 ${user.status !== 'checked_out' ? `<button class="force-checkout-btn" onclick="forceCheckout(${user.id})">Force Checkout</button>` : ''}
@@ -479,16 +501,39 @@
             }
         }
 
+        async function toggleKeyholder(id, isKeyholder) {
+            try {
+                const response = await fetch(`/api/admin/users/${id}/keyholder`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_keyholder: isKeyholder }),
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    displayMessage(isKeyholder ? 'Keyholder enabled.' : 'Keyholder disabled.', 'success', 'userMessage');
+                    fetchUsers();
+                } else {
+                    displayMessage(`Error: ${data.error}`, 'error', 'userMessage');
+                    fetchUsers();
+                }
+            } catch (error) {
+                console.error('Error updating keyholder status:', error);
+                displayMessage('Server error. Could not update keyholder status.', 'error', 'userMessage');
+                fetchUsers();
+            }
+        }
+
         createUserForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const name = document.getElementById('userName').value;
             const rfid_code = document.getElementById('rfidCode').value;
+            const is_keyholder = isKeyholderInput.checked;
             
             try {
                 const response = await fetch('/api/admin/users/create', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, rfid_code }),
+                    body: JSON.stringify({ name, rfid_code, is_keyholder }),
                 });
                 const data = await response.json();
                 if (response.ok) {

@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>9449 Kiosk</title>
-    <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
     <style>
         :root { --glass: rgba(255, 255, 255, 0.1); --accent: #00D2FF; --success: #00FF85; --danger: #ff4d4d; }
         * { touch-action: manipulation; box-sizing: border-box; }
@@ -18,6 +17,9 @@
             padding: 20px; display: flex; justify-content: space-between; 
             align-items: center; border-bottom: 1px solid #333; gap: 15px;
         }
+
+        .header-copy h1 { margin: 0; }
+        .header-copy p { margin: 4px 0 0; color: #9aa4b2; font-size: 0.9rem; }
 
         /* Search Bar with Clear Button */
         .search-container { position: relative; flex-grow: 1; max-width: 500px; }
@@ -43,6 +45,7 @@
             position: relative; transition: all 0.2s;
         }
         .user-card:active { transform: scale(0.96); background: rgba(255,255,255,0.15); }
+        .user-card button { width: 100%; margin-top: 14px; background: white; color: black; }
 
         /* Larger Images */
         .avatar { 
@@ -57,11 +60,6 @@
         .online { background: var(--success); box-shadow: 0 0 10px var(--success); }
         .offline { background: #555; }
 
-        /* Scanner */
-        #scanner-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 100; flex-direction: column; align-items: center; justify-content: center; backdrop-filter: blur(10px); }
-        video { width: 350px; height: 450px; object-fit: cover; border-radius: 30px; border: 2px solid var(--accent); }
-        .log-box { width: 350px; height: 100px; background: #000; font-family: monospace; font-size: 12px; color: var(--success); padding: 12px; margin: 15px 0; overflow-y: auto; border-radius: 10px; border: 1px solid #333; }
-
         .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; align-items: center; justify-content: center; }
         .modal-content { background: #1c2128; padding: 30px; border-radius: 25px; width: 320px; text-align: center; border: 1px solid #444; }
         .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
@@ -72,9 +70,9 @@
 <body>
 
 <header>
-    <div>
+    <div class="header-copy">
         <h1 id="time" style="margin:0">00:00</h1>
-        <div id="aiStatus" style="font-size: 0.7rem; color: #777;">AI INITIALIZING...</div>
+        <p>Search a name, tap the card, then choose check in, check out, or break.</p>
     </div>
 
     <div class="search-container">
@@ -82,20 +80,10 @@
         <button id="clearSearch" class="clear-btn" onclick="clearSearch()">✕</button>
     </div>
 
-    <button id="loginBtn" onclick="openScanner()" disabled style="background:var(--accent); color:black; border-radius:50px; padding:15px 25px; font-weight:800;">FACE LOGIN</button>
+    <button id="refreshBtn" onclick="loadUsers()" style="background:var(--accent); color:black; border-radius:50px; padding:15px 25px; font-weight:800;">REFRESH</button>
 </header>
 
 <div class="user-grid" id="userGrid"></div>
-
-<div id="scanner-overlay">
-    <h2 id="scanMsg">Align Face</h2>
-    <video id="faceVideo" playsinline autoplay muted></video>
-    <div class="log-box" id="log">> Camera standby...</div>
-    <div style="display:flex; gap:10px;">
-        <button id="scanBtn" onclick="runCapture()" style="width:260px; background:var(--accent); color:black;">CAPTURE SCAN</button>
-        <button onclick="closeScanner()" style="background:#333; color:white; width:80px;">Exit</button>
-    </div>
-</div>
 
 <div id="actionModal" class="modal">
     <div class="modal-content">
@@ -108,26 +96,25 @@
 
 <script>
     let allUsers = [];
-    let faceStream = null;
 
     async function init() {
-        try {
-            const res = await fetch('/api/users/all');
-            allUsers = await res.json();
-            renderGrid(allUsers);
-        } catch(e) { console.error("API error"); }
-
-        try {
-            await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
-            await faceapi.nets.faceLandmark68TinyNet.loadFromUri('/models');
-            await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
-            document.getElementById('aiStatus').innerText = "AI ONLINE";
-            document.getElementById('loginBtn').disabled = false;
-        } catch(e) { document.getElementById('aiStatus').innerText = "AI OFFLINE"; }
+        await loadUsers();
         
         setInterval(() => { 
             document.getElementById('time').innerText = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); 
         }, 1000);
+    }
+
+    async function loadUsers() {
+        try {
+            const res = await fetch('/api/users/all');
+            if (!res.ok) throw new Error('Failed to fetch users');
+            allUsers = await res.json();
+            filterUsers();
+        } catch (error) {
+            console.error('API error:', error);
+            document.getElementById('userGrid').innerHTML = '<div style="grid-column:1/-1; padding:24px; color:#ff8a8a;">Could not load users.</div>';
+        }
     }
 
     function filterUsers() {
@@ -151,71 +138,9 @@
                 <div class="status-dot ${u.status === 'checked_in' ? 'online' : 'offline'}"></div>
                 <div class="avatar">${u.profile_picture_url ? `<img src="${u.profile_picture_url}">` : u.name[0]}</div>
                 <div style="font-size:1.2rem; font-weight:700; letter-spacing:0.5px;">${u.name}</div>
+                <button class="btn-primary">Open</button>
             </div>
         `).join('');
-    }
-
-    async function openScanner() {
-        document.getElementById('scanner-overlay').style.display = 'flex';
-        document.getElementById('scanMsg').innerText = "Align Face";
-        document.getElementById('scanMsg').style.color = "white";
-        faceStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-        document.getElementById('faceVideo').srcObject = faceStream;
-    }
-
-    async function runCapture() {
-        const btn = document.getElementById('scanBtn');
-        const msg = document.getElementById('scanMsg');
-        btn.disabled = true;
-        const logEl = document.getElementById('log');
-        const log = (m) => logEl.innerHTML += `<div>> ${m}</div>`;
-        logEl.scrollTop = logEl.scrollHeight;
-        
-        log("Analyzing...");
-        const detection = await faceapi.detectSingleFace(document.getElementById('faceVideo'), new faceapi.TinyFaceDetectorOptions({ inputSize: 224 })).withFaceLandmarks(true).withFaceDescriptor();
-
-        if (!detection) {
-            log("<span style='color:red'>No face found. Try again...</span>");
-            msg.innerText = "NO FACE DETECTED";
-            msg.style.color = "var(--danger)";
-            // Reset logic: Re-enable button after 1.5 seconds so user can try again immediately
-            setTimeout(() => { 
-                btn.disabled = false; 
-                msg.innerText = "Align Face";
-                msg.style.color = "white";
-            }, 1500);
-            return;
-        }
-
-        const labeled = allUsers
-            .filter(u => u.face_descriptor && u.face_descriptor !== "null")
-            .map(u => {
-                try {
-                    const raw = JSON.parse(u.face_descriptor);
-                    const listOfArrays = Array.isArray(raw) ? raw : [raw];
-                    const valid = listOfArrays.map(item => new Float32Array(Object.values(item))).filter(d => d.length === 128);
-                    return valid.length > 0 ? new faceapi.LabeledFaceDescriptors(u.id.toString(), valid) : null;
-                } catch(e) { return null; }
-            }).filter(v => v !== null);
-
-        if (labeled.length === 0) { log("No profiles in DB."); btn.disabled = false; return; }
-
-        const match = new faceapi.FaceMatcher(labeled, 0.6).findBestMatch(detection.descriptor);
-        
-        if (match.label !== 'unknown') {
-            const user = allUsers.find(u => u.id == match.label);
-            closeScanner();
-            handleSelect(user);
-        } else {
-            log("<span style='color:red'>Unknown User.</span>");
-            msg.innerText = "MATCH FAILED";
-            msg.style.color = "var(--danger)";
-            setTimeout(() => { 
-                btn.disabled = false; 
-                msg.innerText = "Align Face";
-                msg.style.color = "white";
-            }, 1500);
-        }
     }
 
     function handleSelect(user) {
@@ -230,15 +155,16 @@
 
     async function perform(action, userId) {
         const url = action === 'check-in' ? '/api/check-in' : action === 'check-out' ? '/api/check-out' : '/api/break/start';
-        await fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ user_id: userId }) });
-        location.reload();
+        const response = await fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ user_id: userId }) });
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            alert(data.error || 'Action failed.');
+            return;
+        }
+        await loadUsers();
+        closeModal();
     }
 
-    function closeScanner() { 
-        if(faceStream) faceStream.getTracks().forEach(t => t.stop()); 
-        document.getElementById('scanner-overlay').style.display = 'none'; 
-        document.getElementById('scanBtn').disabled = false;
-    }
     function closeModal() { document.getElementById('actionModal').style.display = 'none'; }
     window.onload = init;
 </script>

@@ -35,6 +35,25 @@ const db = new sqlite3.Database(DBSOURCE, (err) => {
             }
         });
 
+        db.run(`CREATE TABLE IF NOT EXISTS attendance_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            work_date TEXT NOT NULL,
+            checked_in_at TEXT NOT NULL,
+            checked_in_ms INTEGER NOT NULL,
+            checked_out_at TEXT,
+            checked_out_ms INTEGER,
+            duration_minutes INTEGER DEFAULT 0,
+            invalidated INTEGER DEFAULT 0,
+            invalidated_reason TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )`, (err) => {
+            if (err) {
+                console.error('Error creating attendance_sessions table:', err.message);
+            }
+        });
+
         // Add the new certifications table
         db.run(`CREATE TABLE IF NOT EXISTS certifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
