@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hive Access Login</title>
+    <style>
+        :root {
+            --ink: #1f1b16;
+            --gold: #f7b733;
+            --gold-deep: #d99000;
+            --paper: #fff8ea;
+            --paper-2: #fffdf6;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            font-family: Arial, sans-serif;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at top left, rgba(247,183,51,0.25), transparent 30%),
+                radial-gradient(circle at bottom right, rgba(255,200,61,0.18), transparent 28%),
+                linear-gradient(135deg, #fffdf7 0%, #f7f2e7 55%, #fff7e6 100%);
+        }
+        .panel {
+            width: min(440px, 100%);
+            padding: 28px;
+            border-radius: 28px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,248,234,0.98));
+            border: 1px solid rgba(31,27,22,0.12);
+            box-shadow: 0 24px 70px rgba(31,27,22,0.16);
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+        .bee {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(90deg, #1f1b16 0 18%, #ffc83d 18% 34%, #1f1b16 34% 50%, #ffc83d 50% 66%, #1f1b16 66% 82%, #ffc83d 82% 100%);
+            box-shadow: inset 0 0 0 3px rgba(255,255,255,0.5);
+        }
+        h1 {
+            margin: 0;
+            font-size: 1.8rem;
+            line-height: 1;
+        }
+        .sub {
+            margin: 8px 0 22px;
+            color: rgba(31,27,22,0.72);
+            line-height: 1.5;
+        }
+        .error {
+            display: none;
+            margin-bottom: 18px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: rgba(217, 144, 0, 0.12);
+            border: 1px solid rgba(217, 144, 0, 0.28);
+            color: #8a5300;
+            font-weight: 700;
+        }
+        form {
+            display: grid;
+            gap: 14px;
+        }
+        label {
+            display: grid;
+            gap: 8px;
+            font-size: 0.92rem;
+            font-weight: 700;
+        }
+        input {
+            width: 100%;
+            border: 1px solid rgba(31,27,22,0.16);
+            background: var(--paper-2);
+            border-radius: 14px;
+            padding: 14px 16px;
+            font-size: 1rem;
+            color: var(--ink);
+            outline: none;
+        }
+        input:focus {
+            border-color: var(--gold-deep);
+            box-shadow: 0 0 0 4px rgba(247, 183, 51, 0.18);
+        }
+        button {
+            border: none;
+            border-radius: 999px;
+            padding: 14px 18px;
+            font-size: 1rem;
+            font-weight: 800;
+            color: #1f1b16;
+            background: linear-gradient(135deg, #f7b733, #ffd36a);
+            cursor: pointer;
+            box-shadow: 0 14px 30px rgba(217, 144, 0, 0.24);
+        }
+        button:hover {
+            filter: brightness(1.02);
+        }
+        .note {
+            margin-top: 14px;
+            font-size: 0.85rem;
+            color: rgba(31,27,22,0.65);
+            line-height: 1.45;
+        }
+    </style>
+</head>
+<body>
+    <div class="panel">
+        <div class="brand">
+            <div class="bee" aria-hidden="true"></div>
+            <div>
+                <h1>Hive Access</h1>
+            </div>
+        </div>
+        <div class="sub">Sign in with your username and password before the attendance system loads any data.</div>
+        <div class="error" id="errorBox">Invalid username or password.</div>
+        <form method="POST" action="/login" autocomplete="on">
+            <input type="hidden" name="next" id="nextField" value="/">
+            <label>
+                Username
+                <input type="text" name="username" autocomplete="username" required autofocus>
+            </label>
+            <label>
+                Password
+                <input type="password" name="password" autocomplete="current-password" required>
+            </label>
+            <button type="submit">Log In</button>
+        </form>
+        <div class="note">If you want to change the credentials, set `APP_LOGIN_USERNAME` and `APP_LOGIN_PASSWORD` before starting the server.</div>
+    </div>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const nextField = document.getElementById('nextField');
+        const errorBox = document.getElementById('errorBox');
+        const nextValue = params.get('next');
+
+        if (nextValue && nextValue.startsWith('/') && !nextValue.startsWith('//')) {
+            nextField.value = nextValue;
+        }
+
+        if (params.get('error')) {
+            errorBox.style.display = 'block';
+        }
+    </script>
+</body>
+</html>

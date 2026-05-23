@@ -95,6 +95,12 @@
         .edit-cert-btn:hover {
             background-color: #4cae4c;
         }
+        .print-card-btn {
+            background-color: #f0ad4e;
+        }
+        .print-card-btn:hover {
+            background-color: #ec971f;
+        }
         .message {
             margin-top: 10px;
             padding: 10px;
@@ -242,6 +248,10 @@
                 <button type="submit" id="downloadCsvButton">Download CSV Log</button>
                 <button type="button" id="downloadPdfButton">Generate PDF Report</button>
             </form>
+            <div style="margin-top: 12px;">
+                <button type="button" class="print-card-btn" onclick="printAllCards()">Print All Cards</button>
+                <button type="button" class="delete-btn" onclick="logout()">Logout</button>
+            </div>
         </div>
         <a href="/">Go back to Main Page</a>
     </div>
@@ -321,6 +331,7 @@
                             <td>${user.status}</td>
                             <td>
                                 ${user.status !== 'checked_out' ? `<button class="force-checkout-btn" onclick="forceCheckout(${user.id})">Force Checkout</button>` : ''}
+                                <button class="print-card-btn" onclick="printCard(${user.id})">Print Card</button>
                                 <button class="delete-btn" onclick="deleteUser(${user.id})">Delete</button>
                                 <button class="edit-cert-btn" onclick="openCertModal(${user.id}, '${user.name}')">Edit Certifications</button>
                             </td>
@@ -521,6 +532,18 @@
                 displayMessage('Server error. Could not update keyholder status.', 'error', 'userMessage');
                 fetchUsers();
             }
+        }
+
+        function printCard(id) {
+            window.open(`/admin/cards/${id}`, '_blank', 'noopener,noreferrer');
+        }
+
+        function printAllCards() {
+            window.open('/admin/cards/all', '_blank', 'noopener,noreferrer');
+        }
+
+        function logout() {
+            window.location.href = '/logout';
         }
 
         createUserForm.addEventListener('submit', async (e) => {

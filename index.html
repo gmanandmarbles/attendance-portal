@@ -577,7 +577,14 @@
             if (!response.ok) {
                 showMessageModal('Error', data.error, 'error');
             } else {
-                showMessageModal('Success', data.message, 'success');
+                const fallbackMessage = actionType === 'check-out'
+                    ? 'User checked out successfully.'
+                    : actionType === 'check-in'
+                        ? 'User checked in successfully.'
+                        : actionType === 'break-start'
+                            ? 'Break started successfully.'
+                            : 'Action completed successfully.';
+                showMessageModal('Success', data.message || fallbackMessage, 'success');
             }
         } catch (error) {
             console.error('Network or server error:', error);
@@ -638,7 +645,7 @@
             if (!response.ok) {
                 showMessageModal('Error', `Error ending break for ${userName}: ${data.error}`, 'error');
             } else {
-                showMessageModal('Success', data.message, 'success');
+                showMessageModal('Success', data.message || 'User returned from break successfully.', 'success');
             }
             reportModal.style.display = 'none';
         } catch (error) {
