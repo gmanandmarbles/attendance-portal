@@ -1,0 +1,6 @@
+Flask
+Flask-SQLAlchemy
+Authlib
+requests
+Werkzeug
+python-dotenv
