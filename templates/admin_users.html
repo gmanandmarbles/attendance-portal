@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}User Management{% endblock %}
+
+{% block content %}
+<h3 class="mb-4">Admin Portal: User Management</h3>
+
+<!-- Account Provisioning Form -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-dark text-white">
+        <h5 class="card-title mb-0">Provision New Student / Mentor Account</h5>
+    </div>
+    <div class="card-body">
+        <form method="POST" class="row g-3">
+            <input type="hidden" name="action" value="provision">
+            <div class="col-md-3">
+                <label class="form-label fw-bold">Google Email</label>
+                <input type="email" name="email" class="form-control" placeholder="user@gmail.com" required>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-bold">Full Name</label>
+                <input type="text" name="name" class="form-control" placeholder="John Doe">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-bold">Barcode ID</label>
+                <input type="text" name="barcode" class="form-control" placeholder="Card Barcode String">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-bold">Role</label>
+                <select name="role" class="form-select">
+                    <option value="student">Student</option>
+                    <option value="mentor">Mentor</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <div class="col-md-1 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100">Add</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- User List Table -->
+<div class="table-responsive bg-white rounded shadow-sm">
+    <table class="table table-bordered align-middle mb-0">
+        <thead class="table-light">
+            <tr>
+                <th>Photo</th>
+                <th>Email</th>
+                <th>Name</th>
+                <th>Barcode ID</th>
+                <th>Role</th>
+                <th>Upload Photo</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in users %}
+            <tr>
+                <td class="text-center" style="width: 70px;">
+                    {% if u.photo_url %}
+                    <img src="/{{ u.photo_url }}" class="avatar-sm" alt="Photo">
+                    {% else %}
+                    <span class="text-muted small">None</span>
+                    {% endif %}
+                </td>
+                <td>{{ u.email }}</td>
+                <td>{{ u.name or 'N/A' }}</td>
+                <td><code>{{ u.barcode or 'N/A' }}</code></td>
+                <td style="width: 150px;">
+                    <form method="POST">
+                        <input type="hidden" name="action" value="update_role">
+                        <input type="hidden" name="user_id" value="{{ u.id }}">
+                        <select name="role" class="form-select form-select-sm" onchange="this.form.submit()">
+                            <option value="student" {% if u.role == 'student' %}selected{% endif %}>Student</option>
+                            <option value="mentor" {% if u.role == 'mentor' %}selected{% endif %}>Mentor</option>
+                            <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>Admin</option>
+                        </select>
+                    </form>
+                </td>
+                <td style="width: 300px;">
+                    <form method="POST" enctype="multipart/form-data" class="d-flex">
+                        <input type="hidden" name="action" value="upload_photo">
+                        <input type="hidden" name="user_id" value="{{ u.id }}">
+                        <input type="file" name="photo" class="form-control form-control-sm me-1" accept="image/*" required>
+                        <button type="submit" class="btn btn-sm btn-secondary">Upload</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

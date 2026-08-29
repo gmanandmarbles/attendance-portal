@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Student Inspection{% endblock %}
+
+{% block content %}
+<h3 class="mb-4">Student Attendance & Hours Inspection</h3>
+
+<div class="row">
+    <!-- Student List Navigation -->
+    <div class="col-md-4 mb-4 mb-md-0">
+        <div class="list-group shadow-sm" style="max-height: 70vh; overflow-y: auto;">
+            {% for u in students %}
+            <a href="{{ url_for('mentor_students', user_id=u.id) }}" 
+               class="list-group-item list-group-item-action d-flex align-items-center {% if selected_user and selected_user.id == u.id %}active{% endif %}">
+                {% if u.photo_url %}
+                <img src="/{{ u.photo_url }}" class="avatar-sm me-3" alt="Photo">
+                {% else %}
+                <div class="avatar-sm me-3 bg-secondary rounded-circle d-flex align-items-center justify-content-center text-white small">N/A</div>
+                {% endif %}
+                <div class="flex-grow-1">
+                    <div class="d-flex w-100 justify-content-between">
+                        <h6 class="mb-0">{{ u.name or u.email }}</h6>
+                        <small class="badge bg-dark text-capitalize ms-1">{{ u.role }}</small>
+                    </div>
+                    <small class="{% if selected_user and selected_user.id == u.id %}text-white-50{% else %}text-muted{% endif %}">{{ u.email }}</small>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Selected Student Detailed Summary -->
+    <div class="col-md-8">
+        {% if selected_user %}
+        <div class="card shadow-sm p-4 mb-4">
+            <div class="d-flex align-items-center">
+                {% if selected_user.photo_url %}
+                <img src="/{{ selected_user.photo_url }}" class="avatar-md me-3" style="width: 80px; height: 80px;" alt="Photo">
+                {% endif %}
+                <div>
+                    <h3 class="mb-1">{{ selected_user.name or selected_user.email }}</h3>
+                    <p class="mb-1 text-muted">Email: {{ selected_user.email }} | Barcode: <code>{{ selected_user.barcode or 'None' }}</code></p>
+                    <h5 class="mb-0 text-success">Total Lifetime Hours: <strong>{{ total_hours }} hrs</strong></h5>
+                </div>
+            </div>
+        </div>
+
+        <h5 class="mb-3">Attendance Logs</h5>
+        <div class="table-responsive bg-white rounded shadow-sm mb-4">
+            <table class="table table-sm table-striped align-middle mb-0">
+                <thead class="table-light">
+                    <tr><th>Session</th><th>Check In</th><th>Check Out</th><th>Duration</th></tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td>{{ log.session.title }}</td>
+                        <td>{{ log.check_in.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>{{ log.check_out.strftime('%Y-%m-%d %H:%M') if log.check_out else '<span class="badge bg-warning text-dark">OPEN</span>'|safe }}</td>
+                        <td><strong>{{ log.duration_hours }} hrs</strong></td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" class="text-muted text-center py-3">No attendance logs recorded.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <h5 class="mb-3">Submitted Absence Notices</h5>
+        <div class="table-responsive bg-white rounded shadow-sm">
+            <table class="table table-sm table-warning align-middle mb-0">
+                <thead>
+                    <tr><th>Session</th><th>Window Start</th><th>Window End</th><th>Reason</th></tr>
+                </thead>
+                <tbody>
+                    {% for abs in absences %}
+                    <tr>
+                        <td>{{ abs.session.title }}</td>
+                        <td>{{ abs.start_time.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>{{ abs.end_time.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>{{ abs.reason or 'N/A' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" class="text-muted text-center py-3">No absence notices submitted.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-info shadow-sm text-center py-5">
+            <h4 class="alert-heading">No Student Selected</h4>
+            <p class="mb-0">Click any student from the left panel to inspect their detailed hours, logs, and absence notices.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

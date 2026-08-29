@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Absence Overview{% endblock %}
+
+{% block content %}
+<h2 class="mb-4 fw-bold">📋 Student Absence Tracker</h2>
+
+<div class="row">
+    <!-- Sidebar List of Sessions -->
+    <div class="col-md-4 mb-4">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-dark text-white fw-bold">
+                Select Build Session
+            </div>
+            <div class="list-group list-group-flush">
+                {% for s in sessions %}
+                <a href="{{ url_for('mentor_absences', session_id=s.id) }}" 
+                   class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {% if selected_session and selected_session.id == s.id %}active{% endif %}">
+                    <div>
+                        <strong>{{ s.title }}</strong><br>
+                        <small class="{% if selected_session and selected_session.id == s.id %}text-white-50{% else %}text-muted{% endif %}">
+                            {{ s.start_time.strftime('%b %d, %Y') }}
+                        </small>
+                    </div>
+                    <span class="badge bg-warning text-dark rounded-pill">
+                        {{ s.absences|length }}
+                    </span>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Absence Details Panel -->
+    <div class="col-md-8">
+        {% if selected_session %}
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white py-3 border-0">
+                <h4 class="mb-0 fw-bold">{{ selected_session.title }}</h4>
+                <small class="text-muted">
+                    📍 {{ selected_session.location }} | 
+                    🕒 {{ selected_session.start_time.strftime('%Y-%m-%d %H:%M') }} - {{ selected_session.end_time.strftime('%H:%M') }}
+                </small>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Student</th>
+                                <th>Absence Window</th>
+                                <th>Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for a in absences %}
+                            <tr>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        {% if a.user.photo_url %}
+                                        <img src="{{ url_for('get_photo', filename=a.user.photo_url.split('/')[-1]) }}" 
+                                             class="rounded-circle me-2" style="width: 32px; height: 32px; object-fit: cover;">
+                                        {% endif %}
+                                        <div>
+                                            <strong>{{ a.user.name or a.user.email }}</strong><br>
+                                            <small class="text-muted">{{ a.user.email }}</small>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge bg-light text-dark border">
+                                        {{ a.start_time.strftime('%H:%M') }} - {{ a.end_time.strftime('%H:%M') }}
+                                    </span>
+                                </td>
+                                <td><em>{{ a.reason or 'No reason provided' }}</em></td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="3" class="text-muted text-center py-4">
+                                    No students have reported an absence for this session.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

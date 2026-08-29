@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Landing Page - Robotics Attendance{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6 text-center">
+        <div class="card shadow-sm p-5">
+            <h1 class="display-4 fw-bold mb-3">Robotics Attendance</h1>
+            <p class="lead text-muted mb-4">Log in using your team Google account to access your schedule, submit absence notices, and track build hours.</p>
+            <div>
+                <a href="{{ url_for('login') }}" class="btn btn-primary btn-lg px-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="bi bi-google me-2 mb-1" viewBox="0 0 16 16">
+                      <path d="M15.545 6.558a9.42 9.42 0 0 0 .139-1.626c0-2.434-.87-4.492-2.384-5.885h.002C11.978.414 10.15 0 8 0 3.58 0 0 3.58 0 8s3.58 8 8 8c3.566 0 6.687-2.035 8.016-5.013l-3.328-1.745c-.563 1.144-1.761 1.958-3.188 1.958-2.28 0-4.135-1.855-4.135-4.135s1.855-4.135 4.135-4.135c1.233 0 2.338.541 3.09 1.406l2.955-2.828z"/>
+                    </svg>
+                    Log In with Google
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

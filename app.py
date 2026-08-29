@@ -1,0 +1,519 @@
+import os
+import json
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+from functools import wraps
+from flask import (
+    Flask, render_template, redirect, url_for, 
+    request, session, flash, jsonify, send_from_directory, abort
+)
+from flask_sqlalchemy import SQLAlchemy
+from authlib.integrations.flask_client import OAuth
+from werkzeug.utils import secure_filename
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY", "default-dev-key-change-in-production")
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///robotics_attendance.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Protected upload directory (Outside public static path)
+app.config['UPLOAD_FOLDER'] = os.path.join(app.root_path, 'uploads', 'photos')
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+db = SQLAlchemy(app)
+oauth = OAuth(app)
+
+google = oauth.register(
+    name='google',
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={'scope': 'openid email profile'},
+)
+
+# ==========================================
+# TIMEZONE & CUTOFF CONFIGURATION
+# ==========================================
+LOCAL_TZ = ZoneInfo("America/Edmonton")  # Mountain Time (MST/MDT)
+ABSENCE_CUTOFF_HOURS = 5                  # Absences locked 5 hours before session start
+
+def get_local_now():
+    """Returns current date and time in naive Mountain Time."""
+    return datetime.now(ZoneInfo("UTC")).astimezone(LOCAL_TZ).replace(tzinfo=None)
+
+def to_local_naive(dt):
+    """Ensures input timestamps are converted to naive Mountain Time objects."""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(LOCAL_TZ).replace(tzinfo=None)
+    return dt
+
+# ==========================================
+# DATABASE MODELS
+# ==========================================
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    name = db.Column(db.String(100), nullable=True)
+    barcode = db.Column(db.String(50), unique=True, nullable=True)
+    role = db.Column(db.String(20), default='student')
+    photo_url = db.Column(db.String(255), nullable=True)
+
+    absences = db.relationship('AbsenceNotice', backref='user', lazy=True)
+    logs = db.relationship('AttendanceLog', backref='user', lazy=True)
+
+    @property
+    def is_mentor_or_admin(self):
+        return self.role in ['mentor', 'admin']
+
+class BuildSession(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(100), nullable=False)
+    location = db.Column(db.String(100), nullable=False)
+    start_time = db.Column(db.DateTime, nullable=False)
+    end_time = db.Column(db.DateTime, nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+
+    absences = db.relationship('AbsenceNotice', backref='session', lazy=True)
+    logs = db.relationship('AttendanceLog', backref='session', lazy=True)
+
+class AbsenceNotice(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    session_id = db.Column(db.Integer, db.ForeignKey('build_session.id'), nullable=False)
+    start_time = db.Column(db.DateTime, nullable=False)
+    end_time = db.Column(db.DateTime, nullable=False)
+    reason = db.Column(db.String(255), nullable=True)
+
+class AttendanceLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    session_id = db.Column(db.Integer, db.ForeignKey('build_session.id'), nullable=False)
+    check_in = db.Column(db.DateTime, default=get_local_now)
+    check_out = db.Column(db.DateTime, nullable=True)
+
+    @property
+    def duration_hours(self):
+        if self.check_in and self.check_out:
+            delta = self.check_out - self.check_in
+            return round(delta.total_seconds() / 3600.0, 2)
+        return 0.0
+
+    @property
+    def check_in_fmt(self):
+        """Formatted string for arrival time in Mountain Time."""
+        if self.check_in:
+            return self.check_in.strftime('%Y-%m-%d %I:%M %p MST')
+        return "N/A"
+
+    @property
+    def check_out_fmt(self):
+        """Formatted string for departure time in Mountain Time."""
+        if self.check_out:
+            return self.check_out.strftime('%Y-%m-%d %I:%M %p MST')
+        return "Still Active"
+
+# ==========================================
+# HELPERS & DECORATORS
+# ==========================================
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash("Please log in to access this page.", "warning")
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def role_required(*roles):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if 'user_id' not in session:
+                flash("Please log in first.", "warning")
+                return redirect(url_for('login'))
+            current_user = User.query.get(session['user_id'])
+            if not current_user or current_user.role not in roles:
+                flash("Unauthorized action for your role level.", "danger")
+                return redirect(url_for('dashboard'))
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+# ==========================================
+# PROTECTED MEDIA ROUTE
+# ==========================================
+
+@app.route('/photos/<filename>')
+@login_required
+def get_photo(filename):
+    current_user = User.query.get(session['user_id'])
+    
+    # Locate user who owns this filename
+    target_user = User.query.filter(User.photo_url.endswith(filename)).first()
+    
+    if not target_user:
+        abort(404)
+
+    if current_user.id != target_user.id and not current_user.is_mentor_or_admin:
+        abort(403)
+
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+# ==========================================
+# AUTHENTICATION ROUTES
+# ==========================================
+
+@app.route('/')
+def index():
+    if 'user_id' in session:
+        return redirect(url_for('dashboard'))
+    return render_template('index.html')
+
+@app.route('/login')
+def login():
+    redirect_uri = url_for('auth_callback', _external=True)
+    return google.authorize_redirect(redirect_uri)
+
+@app.route('/auth/callback')
+def auth_callback():
+    token = google.authorize_access_token()
+    user_info = token.get('userinfo')
+    
+    if not user_info:
+        user_info = google.get('userinfo').json()
+        
+    email = user_info.get('email', '').lower()
+
+    admin_email = os.getenv("ADMIN_EMAIL", "").lower()
+    user = User.query.filter_by(email=email).first()
+
+    if not user:
+        if admin_email and email == admin_email:
+            user = User(email=email, name=user_info.get('name', 'Admin'), role='admin')
+            db.session.add(user)
+            db.session.commit()
+        else:
+            flash("Your email has not been provisioned by an administrator yet.", "danger")
+            return redirect(url_for('index'))
+
+    if admin_email and email == admin_email and user.role != 'admin':
+        user.role = 'admin'
+        db.session.commit()
+
+    session['user_id'] = user.id
+    session['user_role'] = user.role
+    session['user_name'] = user.name or user.email
+    flash(f"Welcome back, {user.name or user.email}!", "success")
+    return redirect(url_for('dashboard'))
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash("You have logged out.", "info")
+    return redirect(url_for('index'))
+
+# ==========================================
+# USER & STUDENT ROUTES
+# ==========================================
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    user = User.query.get(session['user_id'])
+    now_mountain = get_local_now()
+    
+    # Fetch all build sessions ordered by start time
+    all_sessions = BuildSession.query.order_by(BuildSession.start_time.asc()).all()
+
+    calendar_events = []
+    upcoming_sessions = []
+
+    for s in all_sessions:
+        s_start = to_local_naive(s.start_time)
+        s_end = to_local_naive(s.end_time)
+        
+        # Cutoff rule: Report absence allowed ONLY up to 5 hours before start_time
+        absence_deadline = s_start - timedelta(hours=ABSENCE_CUTOFF_HOURS)
+        is_locked = now_mountain >= absence_deadline
+
+        if not is_locked:
+            upcoming_sessions.append(s)
+
+        calendar_events.append({
+            'id': s.id,
+            'title': s.title,
+            'location': s.location,
+            'start': s_start.strftime('%Y-%m-%dT%H:%M:%S'),
+            'end': s_end.strftime('%Y-%m-%dT%H:%M:%S'),
+            'is_past': is_locked  # Greys out/locks calendar event when cutoff is reached
+        })
+        
+    logs = AttendanceLog.query.filter_by(user_id=user.id).order_by(AttendanceLog.check_in.desc()).all()
+    total_hours = sum(log.duration_hours for log in logs)
+
+    return render_template(
+        'dashboard.html', 
+        user=user, 
+        upcoming_sessions=upcoming_sessions,
+        calendar_events_json=json.dumps(calendar_events),
+        logs=logs,
+        total_hours=round(total_hours, 2),
+        server_time_str=now_mountain.strftime('%Y-%m-%d %I:%M %p MST')
+    )
+
+@app.route('/absence/report', methods=['POST'])
+@login_required
+def report_absence():
+    user_id = session['user_id']
+    session_id = request.form.get('session_id')
+    start_str = request.form.get('start_time')
+    end_str = request.form.get('end_time')
+    reason = request.form.get('reason')
+
+    build_session = BuildSession.query.get_or_404(session_id)
+    now_mountain = get_local_now()
+    s_start = to_local_naive(build_session.start_time)
+
+    # Server-side validation for 5-hour cutoff rule
+    absence_deadline = s_start - timedelta(hours=ABSENCE_CUTOFF_HOURS)
+    if now_mountain >= absence_deadline:
+        flash(f"Absences must be reported at least {ABSENCE_CUTOFF_HOURS} hours prior to session start.", "danger")
+        return redirect(url_for('dashboard'))
+
+    start_time = datetime.strptime(start_str, '%Y-%m-%dT%H:%M') if start_str else build_session.start_time
+    end_time = datetime.strptime(end_str, '%Y-%m-%dT%H:%M') if end_str else build_session.end_time
+
+    notice = AbsenceNotice(
+        user_id=user_id,
+        session_id=build_session.id,
+        start_time=to_local_naive(start_time),
+        end_time=to_local_naive(end_time),
+        reason=reason
+    )
+    db.session.add(notice)
+    db.session.commit()
+    flash("Absence report submitted successfully.", "success")
+    return redirect(url_for('dashboard'))
+
+# ==========================================
+# MENTOR ROUTES
+# ==========================================
+
+@app.route('/mentor/sessions', methods=['GET', 'POST'])
+@role_required('mentor', 'admin')
+def mentor_sessions():
+    if request.method == 'POST':
+        title = request.form.get('title')
+        location = request.form.get('location')
+        start_str = request.form.get('start_time')
+        end_str = request.form.get('end_time')
+
+        start_time = datetime.strptime(start_str, '%Y-%m-%dT%H:%M')
+        end_time = datetime.strptime(end_str, '%Y-%m-%dT%H:%M')
+
+        new_session = BuildSession(
+            title=title,
+            location=location,
+            start_time=to_local_naive(start_time),
+            end_time=to_local_naive(end_time),
+            created_by=session['user_id']
+        )
+        db.session.add(new_session)
+        db.session.commit()
+        flash("Build session created.", "success")
+        return redirect(url_for('mentor_sessions'))
+
+    sessions = BuildSession.query.order_by(BuildSession.start_time.desc()).all()
+    return render_template('mentor_sessions.html', sessions=sessions)
+
+@app.route('/mentor/absences')
+@role_required('mentor', 'admin')
+def mentor_absences():
+    sessions = BuildSession.query.order_by(BuildSession.start_time.desc()).all()
+    selected_id = request.args.get('session_id', type=int)
+    
+    selected_session = None
+    absences = []
+    
+    if selected_id:
+        selected_session = BuildSession.query.get(selected_id)
+        if selected_session:
+            absences = AbsenceNotice.query.filter_by(session_id=selected_id).all()
+    elif sessions:
+        selected_session = sessions[0]
+        absences = AbsenceNotice.query.filter_by(session_id=selected_session.id).all()
+
+    return render_template(
+        'mentor_absences.html', 
+        sessions=sessions, 
+        selected_session=selected_session, 
+        absences=absences
+    )
+
+@app.route('/mentor/students')
+@role_required('mentor', 'admin')
+def mentor_students():
+    students = User.query.all()
+    selected_id = request.args.get('user_id', type=int)
+    
+    selected_user = None
+    user_logs = []
+    user_absences = []
+    total_hours = 0.0
+
+    if selected_id:
+        selected_user = User.query.get(selected_id)
+        if selected_user:
+            user_logs = AttendanceLog.query.filter_by(user_id=selected_id).order_by(AttendanceLog.check_in.desc()).all()
+            user_absences = AbsenceNotice.query.filter_by(user_id=selected_id).all()
+            total_hours = sum(log.duration_hours for log in user_logs)
+
+    return render_template(
+        'mentor_students.html', 
+        students=students, 
+        selected_user=selected_user, 
+        logs=user_logs, 
+        absences=user_absences, 
+        total_hours=round(total_hours, 2)
+    )
+
+# ==========================================
+# ADMIN ROUTES
+# ==========================================
+
+@app.route('/admin/users', methods=['GET', 'POST'])
+@role_required('admin')
+def admin_users():
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'provision':
+            email = request.form.get('email', '').lower()
+            barcode = request.form.get('barcode')
+            name = request.form.get('name')
+            role = request.form.get('role', 'student')
+            
+            if User.query.filter_by(email=email).first():
+                flash("User with this email already exists.", "danger")
+            else:
+                user = User(email=email, barcode=barcode, name=name, role=role)
+                db.session.add(user)
+                db.session.commit()
+                flash(f"Provisioned user {email}.", "success")
+                
+        elif action == 'update_role':
+            user_id = request.form.get('user_id')
+            new_role = request.form.get('role')
+            user = User.query.get(user_id)
+            if user:
+                user.role = new_role
+                db.session.commit()
+                flash(f"Updated role for {user.email} to {new_role}.", "success")
+                
+        elif action == 'upload_photo':
+            user_id = request.form.get('user_id')
+            user = User.query.get(user_id)
+            file = request.files.get('photo')
+            if user and file:
+                filename = secure_filename(f"user_{user.id}_{file.filename}")
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                user.photo_url = f"photos/{filename}"
+                db.session.commit()
+                flash(f"Uploaded photo for {user.email}.", "success")
+
+        return redirect(url_for('admin_users'))
+
+    users = User.query.all()
+    return render_template('admin_users.html', users=users)
+
+# ==========================================
+# KIOSK ENGINE (BARCODE CHECK-IN/OUT)
+# ==========================================
+
+@app.route('/kiosk')
+def kiosk_page():
+    return render_template('kiosk.html')
+
+@app.route('/kiosk/scan', methods=['POST'])
+def kiosk_scan():
+    kiosk_pass = request.json.get('kiosk_password')
+    expected_pass = os.getenv("KIOSK_PASSWORD", "shop_kiosk_passcode_123")
+    
+    if kiosk_pass != expected_pass:
+        return jsonify({"status": "error", "message": "Invalid Kiosk Password"}), 401
+
+    barcode = request.json.get('barcode')
+    user = User.query.filter_by(barcode=barcode).first()
+    if not user:
+        return jsonify({"status": "error", "message": "Barcode Unrecognized"}), 404
+
+    now = get_local_now()
+    
+    active_session = BuildSession.query.filter(
+        BuildSession.start_time <= now,
+        BuildSession.end_time >= now
+    ).first()
+
+    if not active_session:
+        return jsonify({"status": "error", "message": "No Active Build Session Right Now"}), 400
+
+    open_log = AttendanceLog.query.filter_by(
+        user_id=user.id, 
+        session_id=active_session.id, 
+        check_out=None
+    ).first()
+
+    if open_log:
+        open_log.check_out = now
+        db.session.commit()
+
+        if user.is_mentor_or_admin:
+            other_active_mentors = AttendanceLog.query.join(User).filter(
+                AttendanceLog.session_id == active_session.id,
+                AttendanceLog.check_out == None,
+                User.role.in_(['mentor', 'admin']),
+                User.id != user.id
+            ).count()
+
+            if other_active_mentors == 0:
+                unclaimed_student_logs = AttendanceLog.query.join(User).filter(
+                    AttendanceLog.session_id == active_session.id,
+                    AttendanceLog.check_out == None,
+                    User.role == 'student'
+                ).all()
+
+                for unclosed_log in unclaimed_student_logs:
+                    db.session.delete(unclosed_log)
+                
+                db.session.commit()
+
+        return jsonify({
+            "status": "success", 
+            "action": "CHECK_OUT",
+            "message": f"User ({barcode}) signed out!"
+        })
+    else:
+        new_log = AttendanceLog(user_id=user.id, session_id=active_session.id, check_in=now)
+        db.session.add(new_log)
+        db.session.commit()
+        
+        return jsonify({
+            "status": "success", 
+            "action": "CHECK_IN",
+            "message": f"User ({barcode}) signed in!"
+        })
+
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+    app.run(host='0.0.0.0', port=5000, debug=True)

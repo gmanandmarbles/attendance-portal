@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block title %}Student Dashboard{% endblock %}
+
+{% block content %}
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+
+<style>
+    .fc-theme-standard td, .fc-theme-standard th {
+        border-color: #e2e8f0 !important;
+    }
+    .fc-day-past {
+        background-color: #f8fafc !important;
+    }
+    .fc-day-past .fc-daygrid-day-number {
+        color: #94a3b8;
+    }
+    .past-event {
+        background-color: #94a3b8 !important;
+        border-color: #94a3b8 !important;
+        color: #ffffff !important;
+        opacity: 0.65;
+        cursor: not-allowed;
+    }
+    .upcoming-event {
+        background-color: #4f46e5 !important;
+        border-color: #4338ca !important;
+        color: #ffffff !important;
+        box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2);
+        cursor: pointer;
+        transition: transform 0.1s ease;
+    }
+    .upcoming-event:hover {
+        transform: scale(1.02);
+        background-color: #4338ca !important;
+    }
+    .fc-button-primary {
+        background-color: #4f46e5 !important;
+        border-color: #4338ca !important;
+    }
+    .avatar-md {
+        width: 64px;
+        height: 64px;
+        object-fit: cover;
+        border-radius: 50%;
+        border: 2px solid #4f46e5;
+    }
+</style>
+
+<div class="d-flex align-items-center mb-4">
+    {% if user.photo_url %}
+    <img src="{{ url_for('get_photo', filename=user.photo_url.split('/')[-1]) }}" class="avatar-md me-3" alt="Profile Photo">
+    {% endif %}
+    <div>
+        <h2 class="mb-0 fw-bold">Welcome, {{ user.name or user.email }}</h2>
+        <small class="text-muted">{{ user.email }}</small>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-4 mb-3 mb-md-0">
+        <div class="card bg-primary text-white p-3 shadow-sm border-0">
+            <h5 class="card-title text-white-50">Total Recorded Hours</h5>
+            <p class="display-5 fw-bold mb-0">{{ total_hours }} hrs</p>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3 mb-md-0">
+        <div class="card bg-success text-white p-3 shadow-sm border-0">
+            <h5 class="card-title text-white-50">Role Level</h5>
+            <p class="display-5 fw-bold text-capitalize mb-0">{{ user.role }}</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card bg-dark text-white p-3 shadow-sm border-0">
+            <h5 class="card-title text-white-50">Barcode ID</h5>
+            <p class="display-6 fw-bold mb-0"><code>{{ user.barcode or 'Unassigned' }}</code></p>
+        </div>
+    </div>
+</div>
+
+<!-- Calendar Section -->
+<div class="card shadow-sm mb-4 border-0">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-3 border-0">
+        <div>
+            <h4 class="card-title mb-0 fw-bold text-dark">📅 Build Schedule</h4>
+            <small class="text-muted">Click any active session to report an upcoming absence</small>
+        </div>
+        <span class="badge bg-light text-secondary border">Past sessions greyed out</span>
+    </div>
+    <div class="card-body">
+        <div id="calendar"></div>
+    </div>
+</div>
+
+<!-- Hidden Modals Generated for Upcoming Sessions -->
+{% for s in upcoming_sessions %}
+<div class="modal fade" id="absenceModal{{ s.id }}" tabindex="-1" aria-labelledby="absenceModalLabel{{ s.id }}" aria-hidden="true">
+  <div class="modal-dialog">
+    <form action="{{ url_for('report_absence') }}" method="POST" class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold" id="absenceModalLabel{{ s.id }}">Report Absence: {{ s.title }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="session_id" value="{{ s.id }}">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Absence Start Window</label>
+          <input type="datetime-local" name="start_time" class="form-control" value="{{ s.start_time.strftime('%Y-%m-%dT%H:%M') }}" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Absence End Window</label>
+          <input type="datetime-local" name="end_time" class="form-control" value="{{ s.end_time.strftime('%Y-%m-%dT%H:%M') }}" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Reason (Optional)</label>
+          <input type="text" name="reason" class="form-control" placeholder="e.g. Doctor's appointment, Exam prep">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-warning fw-semibold">Submit Notice</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endfor %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var calendarEl = document.getElementById('calendar');
+    var rawEvents = {{ calendar_events_json | safe }};
+
+    var events = rawEvents.map(function(evt) {
+        return {
+            id: evt.id,
+            title: evt.title + " (" + evt.location + ")",
+            start: evt.start,
+            end: evt.end,
+            className: evt.is_past ? 'past-event' : 'upcoming-event',
+            extendedProps: {
+                is_past: evt.is_past
+            }
+        };
+    });
+
+    var calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        headerToolbar: {
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth,timeGridWeek'
+        },
+        events: events,
+        eventClick: function(info) {
+            // Only trigger modal if session is in the future
+            if (!info.event.extendedProps.is_past) {
+                var modalId = 'absenceModal' + info.event.id;
+                var modalEl = document.getElementById(modalId);
+                if (modalEl) {
+                    var bsModal = new bootstrap.Modal(modalEl);
+                    bsModal.show();
+                }
+            }
+        }
+    });
+
+    calendar.render();
+});
+</script>
+{% endblock %}
