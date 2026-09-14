@@ -388,6 +388,26 @@ def mentor_absences():
         absences=absences
     )
 
+@app.route('/mentor/monitor')
+@role_required('mentor', 'admin')
+def mentor_monitor():
+    now_mountain = get_local_now()
+    current_session = BuildSession.query.filter(
+        BuildSession.start_time <= now_mountain,
+        BuildSession.end_time >= now_mountain
+    ).order_by(BuildSession.start_time.desc()).first()
+    signed_in_logs = AttendanceLog.query.join(User).filter(
+        AttendanceLog.check_out.is_(None),
+        User.role == 'student'
+    ).order_by(AttendanceLog.check_in.asc()).all()
+
+    return render_template(
+        'mentor_monitor.html',
+        current_session=current_session,
+        signed_in_logs=signed_in_logs,
+        now_mountain=now_mountain
+    )
+
 @app.route('/mentor/students')
 @role_required('mentor', 'admin')
 def mentor_students():

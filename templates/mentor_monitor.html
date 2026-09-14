@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="30">
+    <title>Live Attendance Monitor</title>
+    <style>
+        :root {
+            --ink: #172033;
+            --muted: #667085;
+            --canvas: #eef3f7;
+            --panel: #ffffff;
+            --line: #d9e2ea;
+            --accent: #0f766e;
+            --accent-soft: #d8f3ee;
+            --warm: #f59e0b;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: radial-gradient(circle at top right, #dcefeb 0, transparent 34%), var(--canvas);
+            color: var(--ink);
+            font-family: Georgia, "Times New Roman", serif;
+        }
+
+        .monitor-shell {
+            width: min(1500px, 100%);
+            margin: 0 auto;
+            padding: clamp(1.5rem, 4vw, 4rem);
+        }
+
+        .monitor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .eyebrow {
+            color: var(--accent);
+            font: 700 0.78rem/1.2 Arial, sans-serif;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        h1 {
+            margin: 0.35rem 0 0;
+            font-size: clamp(2.2rem, 5vw, 4.8rem);
+            line-height: 0.98;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            font: 600 0.9rem Arial, sans-serif;
+        }
+
+        .updated {
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        button {
+            border: 1px solid var(--ink);
+            border-radius: 999px;
+            background: var(--ink);
+            color: white;
+            cursor: pointer;
+            font: 700 0.85rem Arial, sans-serif;
+            padding: 0.75rem 1rem;
+        }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            border-top: 1px solid var(--line);
+            border-bottom: 1px solid var(--line);
+            padding: 1rem 0;
+            margin-bottom: 2rem;
+            font-family: Arial, sans-serif;
+        }
+
+        .session-status {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            font-weight: 700;
+        }
+
+        .status-dot {
+            width: 0.75rem;
+            height: 0.75rem;
+            border-radius: 50%;
+            background: var(--warm);
+        }
+
+        .status-dot.live { background: var(--accent); }
+
+        .count {
+            color: var(--accent);
+            font-size: 1.1rem;
+            font-weight: 800;
+        }
+
+        .student-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+
+        .student-card {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            min-height: 130px;
+            padding: 1.25rem;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel);
+            box-shadow: 0 8px 20px rgba(23, 32, 51, 0.06);
+        }
+
+        .avatar {
+            display: grid;
+            flex: 0 0 4rem;
+            width: 4rem;
+            height: 4rem;
+            place-items: center;
+            overflow: hidden;
+            border-radius: 50%;
+            background: var(--accent-soft);
+            color: var(--accent);
+            font: 700 1.25rem Arial, sans-serif;
+        }
+
+        .avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .student-name { margin: 0; font-size: 1.35rem; line-height: 1.1; }
+        .student-meta { margin-top: 0.45rem; color: var(--muted); font: 0.85rem/1.35 Arial, sans-serif; }
+
+        .empty-state {
+            padding: 5rem 1rem;
+            border: 1px dashed #b8c6d1;
+            border-radius: 12px;
+            color: var(--muted);
+            text-align: center;
+            font: 1rem Arial, sans-serif;
+        }
+
+        @media (max-width: 650px) {
+            .monitor-header, .status-bar { align-items: flex-start; flex-direction: column; }
+            .header-actions { width: 100%; justify-content: space-between; }
+        }
+    </style>
+</head>
+<body>
+    <main class="monitor-shell">
+        <header class="monitor-header">
+            <div>
+                <div class="eyebrow">Robotics Team Hub</div>
+                <h1>Who's in the shop?</h1>
+            </div>
+            <div class="header-actions">
+                <span class="updated">Updated {{ now_mountain.strftime('%I:%M %p') }}</span>
+                <button type="button" id="fullscreenButton">Enter Fullscreen</button>
+            </div>
+        </header>
+
+        <section class="status-bar" aria-live="polite">
+            <div class="session-status">
+                <span class="status-dot {% if current_session %}live{% endif %}"></span>
+                {% if current_session %}
+                <span>{{ current_session.title }} · {{ current_session.location }}</span>
+                {% else %}
+                <span>No build session is active</span>
+                {% endif %}
+            </div>
+            <div class="count">{{ signed_in_logs|length }} student{% if signed_in_logs|length != 1 %}s{% endif %} signed in</div>
+        </section>
+
+        {% if signed_in_logs %}
+        <section class="student-grid" aria-label="Students currently signed in">
+            {% for log in signed_in_logs %}
+            <article class="student-card">
+                <div class="avatar">
+                    {% if log.user.photo_url %}
+                    <img src="{{ url_for('get_photo', filename=log.user.photo_url.split('/')[-1]) }}" alt="">
+                    {% else %}
+                    {{ (log.user.name or log.user.email)[0]|upper }}
+                    {% endif %}
+                </div>
+                <div>
+                    <h2 class="student-name">{{ log.user.name or log.user.email }}</h2>
+                    <div class="student-meta">In since {{ log.check_in.strftime('%I:%M %p') }}<br>{{ log.session.title }}</div>
+                </div>
+            </article>
+            {% endfor %}
+        </section>
+        {% else %}
+        <div class="empty-state">No students are currently signed in.</div>
+        {% endif %}
+    </main>
+
+    <script>
+        document.getElementById('fullscreenButton').addEventListener('click', function () {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen();
+                this.textContent = 'Exit Fullscreen';
+            } else {
+                document.exitFullscreen();
+                this.textContent = 'Enter Fullscreen';
+            }
+        });
+    </script>
+</body>
+</html>
