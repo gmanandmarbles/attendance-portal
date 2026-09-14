@@ -79,6 +79,27 @@
     </div>
 </div>
 
+{% if open_logs %}
+<div class="card shadow-sm border-warning mb-4">
+    <div class="card-header bg-warning-subtle">
+        <h5 class="mb-0">Open Attendance Sessions</h5>
+    </div>
+    <div class="card-body">
+        {% for log in open_logs %}
+        <div class="d-flex justify-content-between align-items-center gap-3 {% if not loop.last %}border-bottom pb-3 mb-3{% endif %}">
+            <div>
+                <strong>{{ log.session.title }}</strong><br>
+                <small class="text-muted">Checked in {{ log.check_in.strftime('%Y-%m-%d %H:%M') }}</small>
+            </div>
+            <form action="{{ url_for('checkout_attendance', log_id=log.id) }}" method="POST">
+                <button type="submit" class="btn btn-outline-danger btn-sm">Sign Out</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
 <!-- Calendar Section -->
 <div class="card shadow-sm mb-4 border-0">
     <div class="card-header bg-white d-flex justify-content-between align-items-center py-3 border-0">

@@ -267,6 +267,7 @@ def dashboard():
         })
         
     logs = AttendanceLog.query.filter_by(user_id=user.id).order_by(AttendanceLog.check_in.desc()).all()
+    open_logs = AttendanceLog.query.filter_by(user_id=user.id, check_out=None).order_by(AttendanceLog.check_in.desc()).all()
     total_hours = sum(log.duration_hours for log in logs)
 
     return render_template(
@@ -275,9 +276,28 @@ def dashboard():
         upcoming_sessions=upcoming_sessions,
         calendar_events_json=json.dumps(calendar_events),
         logs=logs,
+        open_logs=open_logs,
         total_hours=round(total_hours, 2),
         server_time_str=now_mountain.strftime('%Y-%m-%d %I:%M %p MST')
     )
+
+@app.route('/attendance/checkout/<int:log_id>', methods=['POST'])
+@login_required
+def checkout_attendance(log_id):
+    log = AttendanceLog.query.filter_by(
+        id=log_id,
+        user_id=session['user_id'],
+        check_out=None
+    ).first()
+
+    if not log:
+        flash("That attendance session is already closed or was not found.", "warning")
+        return redirect(url_for('dashboard'))
+
+    log.check_out = get_local_now()
+    db.session.commit()
+    flash(f"You signed out of {log.session.title}.", "success")
+    return redirect(url_for('dashboard'))
 
 @app.route('/absence/report', methods=['POST'])
 @login_required
@@ -376,6 +396,7 @@ def mentor_students():
     
     selected_user = None
     user_logs = []
+    open_logs = []
     user_absences = []
     total_hours = 0.0
 
@@ -386,14 +407,33 @@ def mentor_students():
             user_absences = AbsenceNotice.query.filter_by(user_id=selected_id).all()
             total_hours = sum(log.duration_hours for log in user_logs)
 
+            open_logs = [log for log in user_logs if log.check_out is None]
+
     return render_template(
         'mentor_students.html', 
         students=students, 
         selected_user=selected_user, 
         logs=user_logs, 
+        open_logs=open_logs,
         absences=user_absences, 
         total_hours=round(total_hours, 2)
     )
+
+@app.route('/mentor/students/checkout/<int:log_id>', methods=['POST'])
+@role_required('mentor', 'admin')
+def mentor_checkout_attendance(log_id):
+    log = AttendanceLog.query.filter_by(id=log_id, check_out=None).first()
+    selected_id = request.form.get('user_id', type=int)
+
+    if not log:
+        flash("That attendance session is already closed or was not found.", "warning")
+    else:
+        log.check_out = get_local_now()
+        db.session.commit()
+        selected_id = log.user_id
+        flash(f"Closed {log.user.name or log.user.email}'s session for {log.session.title}.", "success")
+
+    return redirect(url_for('mentor_students', user_id=selected_id))
 
 # ==========================================
 # ADMIN ROUTES
@@ -468,19 +508,7 @@ def kiosk_scan():
 
     now = get_local_now()
     
-    active_session = BuildSession.query.filter(
-        BuildSession.start_time <= now,
-        BuildSession.end_time >= now
-    ).first()
-
-    if not active_session:
-        return jsonify({"status": "error", "message": "No Active Build Session Right Now"}), 400
-
-    open_log = AttendanceLog.query.filter_by(
-        user_id=user.id, 
-        session_id=active_session.id, 
-        check_out=None
-    ).first()
+    open_log = AttendanceLog.query.filter_by(user_id=user.id, check_out=None).order_by(AttendanceLog.check_in.desc()).first()
 
     if open_log:
         open_log.check_out = now
@@ -488,7 +516,7 @@ def kiosk_scan():
 
         if user.is_mentor_or_admin:
             other_active_mentors = AttendanceLog.query.join(User).filter(
-                AttendanceLog.session_id == active_session.id,
+                AttendanceLog.session_id == open_log.session_id,
                 AttendanceLog.check_out == None,
                 User.role.in_(['mentor', 'admin']),
                 User.id != user.id
@@ -496,7 +524,7 @@ def kiosk_scan():
 
             if other_active_mentors == 0:
                 unclaimed_student_logs = AttendanceLog.query.join(User).filter(
-                    AttendanceLog.session_id == active_session.id,
+                    AttendanceLog.session_id == open_log.session_id,
                     AttendanceLog.check_out == None,
                     User.role == 'student'
                 ).all()
@@ -512,6 +540,14 @@ def kiosk_scan():
             "message": f"User ({barcode}) signed out!"
         })
     else:
+        active_session = BuildSession.query.filter(
+            BuildSession.start_time <= now,
+            BuildSession.end_time >= now
+        ).first()
+
+        if not active_session:
+            return jsonify({"status": "error", "message": "No Active Build Session Right Now"}), 400
+
         new_log = AttendanceLog(user_id=user.id, session_id=active_session.id, check_in=now)
         db.session.add(new_log)
         db.session.commit()
