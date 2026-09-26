@@ -142,7 +142,18 @@
         }
 
         .avatar img { width: 100%; height: 100%; object-fit: cover; }
-        .student-name { margin: 0; font-size: 1.35rem; line-height: 1.1; }
+        .student-card.is-staff { border-color: var(--accent); background: linear-gradient(0deg, var(--accent-soft) 0%, var(--panel) 55%); }
+        .student-card.is-staff .avatar { background: var(--accent); color: white; }
+        .student-name { margin: 0; font-size: 1.35rem; line-height: 1.1; display: flex; align-items: center; gap: 0.5rem; }
+        .role-badge {
+            font: 700 0.65rem Arial, sans-serif;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--accent);
+            background: var(--accent-soft);
+            border-radius: 999px;
+            padding: 0.2rem 0.55rem;
+        }
         .student-meta { margin-top: 0.45rem; color: var(--muted); font: 0.85rem/1.35 Arial, sans-serif; }
 
         .empty-state {
@@ -182,13 +193,13 @@
                 <span>No build session is active</span>
                 {% endif %}
             </div>
-            <div class="count">{{ signed_in_logs|length }} student{% if signed_in_logs|length != 1 %}s{% endif %} signed in</div>
+            <div class="count">{{ signed_in_logs|length }} signed in</div>
         </section>
 
         {% if signed_in_logs %}
-        <section class="student-grid" aria-label="Students currently signed in">
+        <section class="student-grid" aria-label="People currently signed in">
             {% for log in signed_in_logs %}
-            <article class="student-card">
+            <article class="student-card {% if log.user.role in ['mentor', 'admin'] %}is-staff{% endif %}">
                 <div class="avatar">
                     {% if log.user.photo_url %}
                     <img src="{{ url_for('get_photo', filename=log.user.photo_url.split('/')[-1]) }}" alt="">
@@ -197,14 +208,17 @@
                     {% endif %}
                 </div>
                 <div>
-                    <h2 class="student-name">{{ log.user.name or log.user.email }}</h2>
-                    <div class="student-meta">In since {{ log.check_in.strftime('%I:%M %p') }}<br>{{ log.session.title }}</div>
+                    <h2 class="student-name">
+                        {{ log.user.name or log.user.email }}
+                        {% if log.user.role in ['mentor', 'admin'] %}<span class="role-badge">{{ log.user.role }}</span>{% endif %}
+                    </h2>
+                    <div class="student-meta">In since {{ log.check_in.strftime('%I:%M %p') }}<br>{{ log.session.title if log.session else 'No active session' }}</div>
                 </div>
             </article>
             {% endfor %}
         </section>
         {% else %}
-        <div class="empty-state">No students are currently signed in.</div>
+        <div class="empty-state">No one is currently signed in.</div>
         {% endif %}
     </main>
 
