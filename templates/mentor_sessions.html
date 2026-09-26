@@ -34,6 +34,27 @@
     </div>
 </div>
 
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-dark text-white">
+        <h5 class="card-title mb-0">Import Build Sessions from CSV</h5>
+    </div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('mentor_sessions_import') }}" enctype="multipart/form-data" class="row g-3 align-items-end">
+            <div class="col-md-8">
+                <label class="form-label fw-bold">CSV File</label>
+                <input type="file" name="csv_file" accept=".csv" class="form-control" required>
+                <div class="form-text">
+                    Columns required (header row): <code>title, location, start_time, end_time</code>.
+                    Times can look like <code>2026-03-14T18:00</code>, <code>2026-03-14 18:00</code>, or <code>03/14/2026 6:00 PM</code>.
+                </div>
+            </div>
+            <div class="col-md-4 text-end">
+                <button type="submit" class="btn btn-dark px-4">Import Sessions</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <div class="table-responsive bg-white rounded shadow-sm">
     <table class="table table-bordered align-middle mb-0">
         <thead class="table-light">
