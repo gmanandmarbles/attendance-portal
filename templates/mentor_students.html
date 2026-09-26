@@ -45,30 +45,63 @@
             </div>
         </div>
 
-        <h5 class="mb-3">Attendance Logs</h5>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0">Attendance Logs</h5>
+            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#adjustHoursModal">
+                ⚖️ Adjust Hours
+            </button>
+        </div>
         <div class="table-responsive bg-white rounded shadow-sm mb-4">
             <table class="table table-sm table-striped align-middle mb-0">
                 <thead class="table-light">
-                    <tr><th>Session</th><th>Check In</th><th>Check Out</th><th>Duration</th></tr>
+                    <tr><th>Session</th><th>Check In</th><th>Check Out</th><th>Duration</th><th class="text-end">Actions</th></tr>
                 </thead>
                 <tbody>
                     {% for log in logs %}
                     <tr>
-                        <td>{{ log.session.title }}</td>
-                        <td>{{ log.check_in.strftime('%Y-%m-%d %H:%M') }}</td>
-                        <td>{{ log.check_out.strftime('%Y-%m-%d %H:%M') if log.check_out else '<span class="badge bg-warning text-dark">OPEN</span>'|safe }}</td>
                         <td>
-                            <strong>{{ log.duration_hours }} hrs</strong>
-                            {% if not log.check_out %}
-                            <form action="{{ url_for('mentor_checkout_attendance', log_id=log.id) }}" method="POST" class="d-inline ms-2">
+                            {% if log.is_manual %}
+                            <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Manual Adjustment</span>
+                            {% if log.note %}<div class="small text-muted mt-1">{{ log.note }}</div>{% endif %}
+                            {% else %}
+                            {{ log.session.title if log.session else 'Unknown Session' }}
+                            {% endif %}
+                        </td>
+                        <td>{{ log.check_in.strftime('%Y-%m-%d %H:%M') if not log.is_manual else '—' }}</td>
+                        <td>
+                            {% if log.is_manual %}
+                            —
+                            {% elif log.check_out %}
+                            {{ log.check_out.strftime('%Y-%m-%d %H:%M') }}
+                            {% else %}
+                            <span class="badge bg-warning text-dark">OPEN</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <strong class="{% if log.duration_hours < 0 %}text-danger{% endif %}">{{ log.duration_hours }} hrs</strong>
+                        </td>
+                        <td class="text-end">
+                            {% if not log.check_out and not log.is_manual %}
+                            <form action="{{ url_for('mentor_checkout_attendance', log_id=log.id) }}" method="POST" class="d-inline">
                                 <input type="hidden" name="user_id" value="{{ selected_user.id }}">
-                                <button type="submit" class="btn btn-sm btn-outline-danger">Close Session</button>
+                                <button type="submit" class="btn btn-sm btn-outline-success">Close Session</button>
+                            </form>
+                            <form action="{{ url_for('mentor_wipe_checkout', log_id=log.id) }}" method="POST" class="d-inline"
+                                  onsubmit="return confirm('Sign this student out without crediting any hours for this session?');">
+                                <input type="hidden" name="user_id" value="{{ selected_user.id }}">
+                                <button type="submit" class="btn btn-sm btn-outline-warning">Sign Out (No Hours)</button>
+                            </form>
+                            {% else %}
+                            <form action="{{ url_for('mentor_delete_log', log_id=log.id) }}" method="POST" class="d-inline"
+                                  onsubmit="return confirm('Delete this record? This will adjust the student\'s total hours.');">
+                                <input type="hidden" name="user_id" value="{{ selected_user.id }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
                             </form>
                             {% endif %}
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="4" class="text-muted text-center py-3">No attendance logs recorded.</td></tr>
+                    <tr><td colspan="5" class="text-muted text-center py-3">No attendance logs recorded.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -93,6 +126,40 @@
                     {% endfor %}
                 </tbody>
             </table>
+        </div>
+        <!-- Adjust Hours Modal -->
+        <div class="modal fade" id="adjustHoursModal" tabindex="-1" aria-labelledby="adjustHoursModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <form action="{{ url_for('mentor_adjust_hours') }}" method="POST" class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title fw-bold" id="adjustHoursModalLabel">Adjust Hours for {{ selected_user.name or selected_user.email }}</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <input type="hidden" name="user_id" value="{{ selected_user.id }}">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Action</label>
+                            <select name="adjust_action" class="form-select" required>
+                                <option value="add">Add hours</option>
+                                <option value="remove">Remove hours</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Hours</label>
+                            <input type="number" name="hours" class="form-control" min="0.01" step="0.01" placeholder="e.g. 2.5" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Reason (optional)</label>
+                            <input type="text" name="reason" class="form-control" placeholder="e.g. Mentorship credit, correcting a duplicate entry">
+                        </div>
+                        <p class="small text-muted mb-0">This creates a manual adjustment entry in the log below — it doesn't edit an existing record. You can delete it later if needed.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary fw-semibold">Save Adjustment</button>
+                    </div>
+                </form>
+            </div>
         </div>
         {% else %}
         <div class="alert alert-info shadow-sm text-center py-5">
