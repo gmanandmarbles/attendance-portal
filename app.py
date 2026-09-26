@@ -1,4 +1,6 @@
 import os
+import csv
+import io
 import json
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -104,9 +106,15 @@ class AbsenceNotice(db.Model):
 class AttendanceLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    session_id = db.Column(db.Integer, db.ForeignKey('build_session.id'), nullable=False)
+    # Nullable so manual hour adjustments (not tied to a real build session) can be recorded.
+    session_id = db.Column(db.Integer, db.ForeignKey('build_session.id'), nullable=True)
     check_in = db.Column(db.DateTime, default=get_local_now)
     check_out = db.Column(db.DateTime, nullable=True)
+    # Free-text note, used mainly for manual hour adjustments made by a mentor/admin.
+    note = db.Column(db.String(255), nullable=True)
+    # True when this row was created via the manual "adjust hours" tool rather than an
+    # actual check-in/check-out event.
+    is_manual = db.Column(db.Boolean, default=False, nullable=False)
 
     @property
     def duration_hours(self):
@@ -364,6 +372,109 @@ def mentor_sessions():
     sessions = BuildSession.query.order_by(BuildSession.start_time.desc()).all()
     return render_template('mentor_sessions.html', sessions=sessions)
 
+# Accepted formats for start_time / end_time columns in an imported CSV.
+_SESSION_DT_FORMATS = [
+    '%Y-%m-%dT%H:%M',
+    '%Y-%m-%d %H:%M',
+    '%Y-%m-%d %H:%M:%S',
+    '%m/%d/%Y %H:%M',
+    '%m/%d/%Y %I:%M %p',
+]
+
+def _parse_session_datetime(value):
+    value = (value or '').strip()
+    for fmt in _SESSION_DT_FORMATS:
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
+
+@app.route('/mentor/sessions/import', methods=['POST'])
+@role_required('mentor', 'admin')
+def mentor_sessions_import():
+    """Bulk-create build sessions from an uploaded CSV.
+
+    Expected columns (header row required, case-insensitive):
+      title, location, start_time, end_time
+    Datetime values may be formatted like 2026-03-14T18:00, 2026-03-14 18:00,
+    or 03/14/2026 6:00 PM.
+    """
+    file = request.files.get('csv_file')
+
+    if not file or file.filename == '':
+        flash("Choose a CSV file to import first.", "warning")
+        return redirect(url_for('mentor_sessions'))
+
+    if not file.filename.lower().endswith('.csv'):
+        flash("That doesn't look like a CSV file.", "danger")
+        return redirect(url_for('mentor_sessions'))
+
+    try:
+        raw = file.read().decode('utf-8-sig')
+    except UnicodeDecodeError:
+        flash("Couldn't read that file as text. Please export it as a UTF-8 CSV.", "danger")
+        return redirect(url_for('mentor_sessions'))
+
+    reader = csv.DictReader(io.StringIO(raw))
+
+    if not reader.fieldnames:
+        flash("The CSV file appears to be empty.", "danger")
+        return redirect(url_for('mentor_sessions'))
+
+    # Normalize header names so casing/whitespace differences don't break matching.
+    field_map = {name.strip().lower(): name for name in reader.fieldnames}
+    required = ['title', 'location', 'start_time', 'end_time']
+    missing = [col for col in required if col not in field_map]
+    if missing:
+        flash(f"CSV is missing required column(s): {', '.join(missing)}.", "danger")
+        return redirect(url_for('mentor_sessions'))
+
+    imported = 0
+    errors = []
+
+    for row_num, row in enumerate(reader, start=2):  # row 1 is the header
+        title = (row.get(field_map['title']) or '').strip()
+        location = (row.get(field_map['location']) or '').strip()
+        start_raw = row.get(field_map['start_time'])
+        end_raw = row.get(field_map['end_time'])
+
+        if not title or not location or not start_raw or not end_raw:
+            errors.append(f"Row {row_num}: missing a required value.")
+            continue
+
+        start_time = _parse_session_datetime(start_raw)
+        end_time = _parse_session_datetime(end_raw)
+
+        if not start_time or not end_time:
+            errors.append(f"Row {row_num}: couldn't parse start/end time.")
+            continue
+
+        if end_time <= start_time:
+            errors.append(f"Row {row_num}: end time must be after start time.")
+            continue
+
+        new_session = BuildSession(
+            title=title,
+            location=location,
+            start_time=to_local_naive(start_time),
+            end_time=to_local_naive(end_time),
+            created_by=session['user_id']
+        )
+        db.session.add(new_session)
+        imported += 1
+
+    if imported:
+        db.session.commit()
+        flash(f"Imported {imported} build session{'s' if imported != 1 else ''} from CSV.", "success")
+
+    if errors:
+        preview = "; ".join(errors[:5])
+        more = f" (+{len(errors) - 5} more)" if len(errors) > 5 else ""
+        flash(f"Skipped {len(errors)} row(s): {preview}{more}", "warning")
+
+    return redirect(url_for('mentor_sessions'))
+
 @app.route('/mentor/absences')
 @role_required('mentor', 'admin')
 def mentor_absences():
@@ -398,7 +509,7 @@ def mentor_monitor():
     ).order_by(BuildSession.start_time.desc()).first()
     signed_in_logs = AttendanceLog.query.join(User).filter(
         AttendanceLog.check_out.is_(None),
-        User.role == 'student'
+        User.role.in_(['student', 'mentor', 'admin'])
     ).order_by(AttendanceLog.check_in.asc()).all()
 
     return render_template(
@@ -454,6 +565,87 @@ def mentor_checkout_attendance(log_id):
         flash(f"Closed {log.user.name or log.user.email}'s session for {log.session.title}.", "success")
 
     return redirect(url_for('mentor_students', user_id=selected_id))
+
+@app.route('/mentor/students/wipe_checkout/<int:log_id>', methods=['POST'])
+@role_required('mentor', 'admin')
+def mentor_wipe_checkout(log_id):
+    """Sign a currently-open attendance session out, but discard it entirely
+    so no hours are credited for that session."""
+    log = AttendanceLog.query.filter_by(id=log_id, check_out=None).first()
+    selected_id = request.form.get('user_id', type=int)
+
+    if not log:
+        flash("That attendance session is already closed or was not found.", "warning")
+    else:
+        selected_id = log.user_id
+        name = log.user.name or log.user.email
+        session_title = log.session.title if log.session else "their open session"
+        db.session.delete(log)
+        db.session.commit()
+        flash(f"Signed {name} out of {session_title} with no hours credited.", "success")
+
+    return redirect(url_for('mentor_students', user_id=selected_id))
+
+@app.route('/mentor/students/log/<int:log_id>/delete', methods=['POST'])
+@role_required('mentor', 'admin')
+def mentor_delete_log(log_id):
+    """Delete an attendance log entry entirely (real or manual), adjusting the
+    student's total hours."""
+    log = AttendanceLog.query.get(log_id)
+    selected_id = request.form.get('user_id', type=int)
+
+    if not log:
+        flash("That attendance record was not found.", "warning")
+    else:
+        selected_id = log.user_id
+        name = log.user.name or log.user.email
+        hours = log.duration_hours
+        db.session.delete(log)
+        db.session.commit()
+        flash(f"Deleted a {hours} hr record for {name}.", "success")
+
+    return redirect(url_for('mentor_students', user_id=selected_id))
+
+@app.route('/mentor/students/adjust_hours', methods=['POST'])
+@role_required('mentor', 'admin')
+def mentor_adjust_hours():
+    """Manually add or remove hours from a student's total, independent of any
+    real check-in/check-out. Recorded as a manual AttendanceLog row so it shows
+    up in the log history and can itself be deleted later."""
+    user_id = request.form.get('user_id', type=int)
+    action = request.form.get('adjust_action')  # 'add' or 'remove'
+    hours = request.form.get('hours', type=float)
+    reason = request.form.get('reason', '').strip()
+
+    user = User.query.get(user_id)
+
+    if not user:
+        flash("Student not found.", "danger")
+        return redirect(url_for('mentor_students'))
+
+    if not hours or hours <= 0:
+        flash("Enter a positive number of hours to add or remove.", "warning")
+        return redirect(url_for('mentor_students', user_id=user_id))
+
+    signed_hours = hours if action == 'add' else -hours
+    now = get_local_now()
+
+    note = reason if reason else ("Manual addition" if action == 'add' else "Manual deduction")
+
+    adjustment = AttendanceLog(
+        user_id=user.id,
+        session_id=None,
+        check_in=now,
+        check_out=now + timedelta(hours=signed_hours),
+        note=note,
+        is_manual=True
+    )
+    db.session.add(adjustment)
+    db.session.commit()
+
+    verb = "Added" if action == 'add' else "Removed"
+    flash(f"{verb} {hours} hrs {'to' if action == 'add' else 'from'} {user.name or user.email}'s total.", "success")
+    return redirect(url_for('mentor_students', user_id=user_id))
 
 # ==========================================
 # ADMIN ROUTES
