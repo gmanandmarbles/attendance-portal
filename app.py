@@ -52,6 +52,7 @@ google = oauth.register(
 # ==========================================
 LOCAL_TZ = ZoneInfo("America/Edmonton")  # Mountain Time (MST/MDT)
 ABSENCE_CUTOFF_HOURS = 5                  # Absences locked 5 hours before session start
+EARLY_CHECKIN_BUFFER_MINUTES = 10         # Students may sign in this many minutes early if a mentor/admin is already in
 
 def get_local_now():
     """Returns current date and time in naive Mountain Time."""
@@ -680,6 +681,28 @@ def admin_users():
                 db.session.commit()
                 flash(f"Updated role for {user.email} to {new_role}.", "success")
                 
+        elif action == 'edit_user':
+            user_id = request.form.get('user_id')
+            user = User.query.get(user_id)
+            new_email = request.form.get('email', '').strip().lower()
+            new_name = request.form.get('name', '').strip()
+            new_barcode = request.form.get('barcode', '').strip() or None
+
+            if not user:
+                flash("User not found.", "danger")
+            elif not new_email:
+                flash("Email cannot be blank.", "danger")
+            elif User.query.filter(User.email == new_email, User.id != user.id).first():
+                flash("Another user already has that email.", "danger")
+            elif new_barcode and User.query.filter(User.barcode == new_barcode, User.id != user.id).first():
+                flash("Another user already has that barcode.", "danger")
+            else:
+                user.email = new_email
+                user.name = new_name or None
+                user.barcode = new_barcode
+                db.session.commit()
+                flash(f"Updated details for {user.email}.", "success")
+
         elif action == 'upload_photo':
             user_id = request.form.get('user_id')
             user = User.query.get(user_id)
@@ -696,6 +719,55 @@ def admin_users():
 
     users = User.query.all()
     return render_template('admin_users.html', users=users)
+
+@app.route('/admin/logs')
+@role_required('admin')
+def admin_logs():
+    """A searchable, paginated log of every sign-in/sign-out event."""
+    q = request.args.get('q', '').strip()
+    session_id = request.args.get('session_id', type=int)
+    role_filter = request.args.get('role', '').strip()
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+
+    query = AttendanceLog.query.join(User)
+
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            db.or_(
+                User.name.ilike(like),
+                User.email.ilike(like),
+                User.barcode.ilike(like)
+            )
+        )
+
+    if session_id:
+        query = query.filter(AttendanceLog.session_id == session_id)
+
+    if role_filter in ('student', 'mentor', 'admin'):
+        query = query.filter(User.role == role_filter)
+
+    query = query.order_by(AttendanceLog.check_in.desc())
+
+    total = query.count()
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page = max(1, min(page, total_pages))
+    logs = query.offset((page - 1) * per_page).limit(per_page).all()
+
+    sessions = BuildSession.query.order_by(BuildSession.start_time.desc()).all()
+
+    return render_template(
+        'admin_logs.html',
+        logs=logs,
+        sessions=sessions,
+        q=q,
+        session_id=session_id,
+        role_filter=role_filter,
+        page=page,
+        total_pages=total_pages,
+        total=total
+    )
 
 # ==========================================
 # KIOSK ENGINE (BARCODE CHECK-IN/OUT)
@@ -752,22 +824,45 @@ def kiosk_scan():
             "message": f"User ({barcode}) signed out!"
         })
     else:
-        active_session = BuildSession.query.filter(
-            BuildSession.start_time <= now,
+        # A session is a candidate for check-in if it's currently running, OR it starts
+        # within the early-checkin buffer window (students still need a mentor present
+        # to use the buffer window; mentors/admins can always use it).
+        candidate_session = BuildSession.query.filter(
+            BuildSession.start_time <= now + timedelta(minutes=EARLY_CHECKIN_BUFFER_MINUTES),
             BuildSession.end_time >= now
-        ).first()
+        ).order_by(BuildSession.start_time.asc()).first()
 
-        if not active_session:
+        if not candidate_session:
             return jsonify({"status": "error", "message": "No Active Build Session Right Now"}), 400
 
-        new_log = AttendanceLog(user_id=user.id, session_id=active_session.id, check_in=now)
+        in_buffer = now < candidate_session.start_time
+
+        if in_buffer and not user.is_mentor_or_admin:
+            mentor_present = AttendanceLog.query.join(User).filter(
+                AttendanceLog.session_id == candidate_session.id,
+                AttendanceLog.check_out.is_(None),
+                User.role.in_(['mentor', 'admin'])
+            ).first() is not None
+
+            if not mentor_present:
+                minutes_until = max(1, int((candidate_session.start_time - now).total_seconds() // 60) + 1)
+                return jsonify({
+                    "status": "error",
+                    "message": f"{candidate_session.title} starts in {minutes_until} min. Waiting for a mentor to sign in first."
+                }), 400
+
+        new_log = AttendanceLog(user_id=user.id, session_id=candidate_session.id, check_in=now)
         db.session.add(new_log)
         db.session.commit()
-        
+
+        message = f"User ({barcode}) signed in!"
+        if in_buffer:
+            message = f"User ({barcode}) signed in early — {candidate_session.title} starts soon!"
+
         return jsonify({
             "status": "success", 
             "action": "CHECK_IN",
-            "message": f"User ({barcode}) signed in!"
+            "message": message
         })
 
 if __name__ == '__main__':
