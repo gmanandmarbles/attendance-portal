@@ -4,6 +4,7 @@
 
 {% block content %}
 <h3 class="mb-4">Admin Portal: User Management</h3>
+<p class="text-muted small mb-4">Edit a student or mentor's email, name, or barcode directly in the table below, then click <strong>Save</strong> on that row.</p>
 
 <!-- Account Provisioning Form -->
 <div class="card shadow-sm mb-4">
@@ -46,11 +47,12 @@
         <thead class="table-light">
             <tr>
                 <th>Photo</th>
-                <th>Email</th>
-                <th>Name</th>
-                <th>Barcode ID</th>
-                <th>Role</th>
-                <th>Upload Photo</th>
+                <th style="min-width: 200px;">Email</th>
+                <th style="min-width: 160px;">Name</th>
+                <th style="min-width: 140px;">Barcode ID</th>
+                <th></th>
+                <th style="width: 150px;">Role</th>
+                <th style="width: 280px;">Upload Photo</th>
             </tr>
         </thead>
         <tbody>
@@ -63,9 +65,18 @@
                     <span class="text-muted small">None</span>
                     {% endif %}
                 </td>
-                <td>{{ u.email }}</td>
-                <td>{{ u.name or 'N/A' }}</td>
-                <td><code>{{ u.barcode or 'N/A' }}</code></td>
+                <td>
+                    <input type="email" name="email" form="edit-form-{{ u.id }}" class="form-control form-control-sm" value="{{ u.email }}" required>
+                </td>
+                <td>
+                    <input type="text" name="name" form="edit-form-{{ u.id }}" class="form-control form-control-sm" value="{{ u.name or '' }}" placeholder="Full name">
+                </td>
+                <td>
+                    <input type="text" name="barcode" form="edit-form-{{ u.id }}" class="form-control form-control-sm" value="{{ u.barcode or '' }}" placeholder="Barcode">
+                </td>
+                <td>
+                    <button type="submit" form="edit-form-{{ u.id }}" class="btn btn-sm btn-outline-primary">Save</button>
+                </td>
                 <td style="width: 150px;">
                     <form method="POST">
                         <input type="hidden" name="action" value="update_role">
@@ -77,7 +88,7 @@
                         </select>
                     </form>
                 </td>
-                <td style="width: 300px;">
+                <td style="width: 280px;">
                     <form method="POST" enctype="multipart/form-data" class="d-flex">
                         <input type="hidden" name="action" value="upload_photo">
                         <input type="hidden" name="user_id" value="{{ u.id }}">
@@ -90,4 +101,13 @@
         </tbody>
     </table>
 </div>
+
+<!-- Hidden per-row edit forms. Table cells above reference these via the form="" attribute
+     so the visible inputs can live in the table while still submitting to the right form. -->
+{% for u in users %}
+<form method="POST" id="edit-form-{{ u.id }}">
+    <input type="hidden" name="action" value="edit_user">
+    <input type="hidden" name="user_id" value="{{ u.id }}">
+</form>
+{% endfor %}
 {% endblock %}
