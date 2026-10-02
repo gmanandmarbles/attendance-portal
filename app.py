@@ -2,7 +2,13 @@ import os
 import csv
 import io
 import json
+import smtplib
+import ssl
+import threading
+import time
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
+from email.utils import formataddr
 from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import (
@@ -10,6 +16,7 @@ from flask import (
     request, session, flash, jsonify, send_from_directory, abort
 )
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.exc import IntegrityError
 from authlib.integrations.flask_client import OAuth
 from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -138,6 +145,14 @@ class AttendanceLog(db.Model):
             return self.check_out.strftime('%Y-%m-%d %I:%M %p MST')
         return "Still Active"
 
+class SessionReminder(db.Model):
+    """One row per build session whose mentor absence-reminder has been handled.
+    The unique constraint on session_id is what stops the reminder from ever
+    being sent twice (even across restarts or multiple worker processes)."""
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey('build_session.id'), unique=True, nullable=False)
+    sent_at = db.Column(db.DateTime, default=get_local_now)
+
 # ==========================================
 # HELPERS & DECORATORS
 # ==========================================
@@ -165,6 +180,198 @@ def role_required(*roles):
             return f(*args, **kwargs)
         return decorated_function
     return decorator
+
+# ==========================================
+# MENTOR ABSENCE REMINDER EMAILS (SMTP)
+# ==========================================
+# All configured through .env — see .env.example.
+
+SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_SECURITY = os.getenv("SMTP_SECURITY", "starttls").strip().lower()   # starttls | ssl | none
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "").strip()                 # custom sender name
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "").strip() or SMTP_USER
+
+REMINDER_HOURS_BEFORE = float(os.getenv("REMINDER_HOURS_BEFORE", "6"))
+REMINDER_SEND_IF_NO_ABSENCES = os.getenv("REMINDER_SEND_IF_NO_ABSENCES", "false").strip().lower() in ("1", "true", "yes")
+REMINDER_CHECK_INTERVAL_SECONDS = 60
+
+
+def smtp_configured():
+    return bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD and SMTP_FROM_EMAIL)
+
+
+def _open_smtp():
+    """Open and authenticate an SMTP connection using the .env settings."""
+    if SMTP_SECURITY == "ssl":
+        server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ssl.create_default_context(), timeout=30)
+    else:
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30)
+        if SMTP_SECURITY == "starttls":
+            server.starttls(context=ssl.create_default_context())
+    server.login(SMTP_USER, SMTP_PASSWORD)
+    return server
+
+
+def _make_message(to_email, subject, body):
+    msg = EmailMessage()
+    msg["From"] = formataddr((SMTP_FROM_NAME, SMTP_FROM_EMAIL)) if SMTP_FROM_NAME else SMTP_FROM_EMAIL
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.set_content(body)
+    return msg
+
+
+def send_emails(messages):
+    """Send a list of EmailMessage objects over one connection.
+    Returns how many were sent successfully; a failure on one doesn't stop the rest."""
+    if not messages:
+        return 0
+    sent = 0
+    server = _open_smtp()
+    try:
+        for msg in messages:
+            try:
+                server.send_message(msg)
+                sent += 1
+            except Exception:
+                app.logger.exception("Failed to send email to %s", msg["To"])
+    finally:
+        try:
+            server.quit()
+        except Exception:
+            pass
+    return sent
+
+
+def _fmt_date(dt):
+    return f"{dt:%A, %B} {dt.day}, {dt.year}"
+
+
+def _fmt_time(dt):
+    return dt.strftime("%I:%M %p").lstrip("0")
+
+
+def _collect_absentees(build_session):
+    """Return a sorted list of 'Name' / 'Name (6:30 PM to 8:00 PM)' strings for everyone
+    who reported an absence for this session. Partial-session absences show their window."""
+    s_start = to_local_naive(build_session.start_time)
+    s_end = to_local_naive(build_session.end_time)
+    by_user = {}
+    for notice in AbsenceNotice.query.filter_by(session_id=build_session.id).all():
+        by_user.setdefault(notice.user_id, []).append(notice)
+
+    entries = []
+    for notices in by_user.values():
+        user = notices[0].user
+        name = user.name or user.email
+        covers_all = any(
+            to_local_naive(n.start_time) <= s_start and to_local_naive(n.end_time) >= s_end
+            for n in notices
+        )
+        if covers_all:
+            entries.append(name)
+        else:
+            windows = ", ".join(
+                f"{_fmt_time(to_local_naive(n.start_time))} to {_fmt_time(to_local_naive(n.end_time))}"
+                for n in sorted(notices, key=lambda n: n.start_time)
+            )
+            entries.append(f"{name} ({windows})")
+    return sorted(entries, key=str.lower)
+
+
+def _reminder_body(mentor_name, build_session, absentees):
+    s_start = to_local_naive(build_session.start_time)
+    s_end = to_local_naive(build_session.end_time)
+    when = f"for the session on {_fmt_date(s_start)} from {_fmt_time(s_start)} to {_fmt_time(s_end)}"
+
+    if not absentees:
+        return f"Hey {mentor_name},\n\n{when[0].upper() + when[1:]}, nobody reported they would be absent.\n"
+    if len(absentees) == 1:
+        return f"Hey {mentor_name},\n\n{when[0].upper() + when[1:]}, {absentees[0]} reported they would be absent.\n"
+
+    lines = "\n".join(f"- {a}" for a in absentees)
+    return (
+        f"Hey {mentor_name},\n\n"
+        f"{when[0].upper() + when[1:]}, the following people reported they would be absent:\n\n"
+        f"{lines}\n"
+    )
+
+
+def process_session_reminders():
+    """Find sessions starting within REMINDER_HOURS_BEFORE that haven't had their
+    reminder handled yet, and email every mentor/admin the absence list."""
+    now = get_local_now()
+    horizon = now + timedelta(hours=REMINDER_HOURS_BEFORE)
+
+    due_sessions = BuildSession.query.filter(
+        BuildSession.start_time > now,
+        BuildSession.start_time <= horizon
+    ).order_by(BuildSession.start_time.asc()).all()
+
+    for build_session in due_sessions:
+        if SessionReminder.query.filter_by(session_id=build_session.id).first():
+            continue
+
+        # Claim this session first. If another process beat us to it, the unique
+        # constraint raises IntegrityError and we skip — so no duplicate emails.
+        try:
+            claim = SessionReminder(session_id=build_session.id, sent_at=now)
+            db.session.add(claim)
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            continue
+
+        absentees = _collect_absentees(build_session)
+        if not absentees and not REMINDER_SEND_IF_NO_ABSENCES:
+            continue  # nothing to report; leave the claim so we don't re-check every minute
+
+        mentors = User.query.filter(User.role.in_(['mentor', 'admin'])).all()
+        messages = []
+        s_start = to_local_naive(build_session.start_time)
+        subject = f"Absences for {build_session.title} on {s_start:%b} {s_start.day}"
+        for mentor in mentors:
+            if not mentor.email:
+                continue
+            body = _reminder_body(mentor.name or mentor.email, build_session, absentees)
+            messages.append(_make_message(mentor.email, subject, body))
+
+        try:
+            sent = send_emails(messages)
+        except Exception:
+            app.logger.exception("Could not connect to SMTP server for session %s", build_session.id)
+            sent = 0
+
+        if messages and sent == 0:
+            # Total failure: release the claim so the next check retries (until the session starts).
+            db.session.delete(SessionReminder.query.filter_by(session_id=build_session.id).first())
+            db.session.commit()
+            app.logger.error("Absence reminder for session %s failed; will retry.", build_session.id)
+        else:
+            app.logger.info("Absence reminder for session %s sent to %d mentor(s).", build_session.id, sent)
+
+
+def _reminder_loop():
+    while True:
+        try:
+            with app.app_context():
+                process_session_reminders()
+        except Exception:
+            app.logger.exception("Reminder check failed")
+        time.sleep(REMINDER_CHECK_INTERVAL_SECONDS)
+
+
+def start_reminder_scheduler():
+    if not smtp_configured():
+        app.logger.warning(
+            "Mentor absence reminders are OFF: set SMTP_HOST, SMTP_USER and SMTP_PASSWORD in .env to enable them."
+        )
+        return
+    threading.Thread(target=_reminder_loop, name="absence-reminders", daemon=True).start()
+    app.logger.info("Mentor absence reminders ON (sent %s hours before each session).", REMINDER_HOURS_BEFORE)
 
 # ==========================================
 # PROTECTED MEDIA ROUTE
@@ -868,4 +1075,11 @@ def kiosk_scan():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+
+    DEBUG_MODE = True
+    # In debug mode Flask re-launches this script in a child process (the reloader);
+    # only start the reminder thread in the process that actually serves requests.
+    if not DEBUG_MODE or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        start_reminder_scheduler()
+
+    app.run(host='0.0.0.0', port=5000, debug=DEBUG_MODE)
