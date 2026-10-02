@@ -194,6 +194,9 @@ SMTP_SECURITY = os.getenv("SMTP_SECURITY", "starttls").strip().lower()   # start
 SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "").strip()                 # custom sender name
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "").strip() or SMTP_USER
 
+# Public URL of the portal, used in the student invitation email
+APP_URL = os.getenv("APP_URL", "https://attendance.albt.qzz.io/").strip()
+
 REMINDER_HOURS_BEFORE = float(os.getenv("REMINDER_HOURS_BEFORE", "6"))
 REMINDER_SEND_IF_NO_ABSENCES = os.getenv("REMINDER_SEND_IF_NO_ABSENCES", "false").strip().lower() in ("1", "true", "yes")
 REMINDER_CHECK_INTERVAL_SECONDS = 60
@@ -297,6 +300,17 @@ def _reminder_body(mentor_name, build_session, absentees):
         f"Hey {mentor_name},\n\n"
         f"{when[0].upper() + when[1:]}, the following people reported they would be absent:\n\n"
         f"{lines}\n"
+    )
+
+
+def _invite_body(student_name, student_email):
+    return (
+        f"Hey {student_name},\n\n"
+        f"We now have an attendance system for build sessions. You can use it to report "
+        f"when you'll be absent from a session.\n\n"
+        f"Sign in with the Google account for {student_email} here:\n"
+        f"{APP_URL}\n\n"
+        f"Absences need to be reported at least {ABSENCE_CUTOFF_HOURS} hours before a session starts.\n"
     )
 
 
@@ -579,6 +593,97 @@ def mentor_sessions():
 
     sessions = BuildSession.query.order_by(BuildSession.start_time.desc()).all()
     return render_template('mentor_sessions.html', sessions=sessions)
+
+@app.route('/mentor/sessions/<int:session_id>/edit', methods=['POST'])
+@role_required('mentor', 'admin')
+def mentor_edit_session(session_id):
+    build_session = BuildSession.query.get_or_404(session_id)
+
+    title = request.form.get('title', '').strip()
+    location = request.form.get('location', '').strip()
+    start_time = _parse_session_datetime(request.form.get('start_time'))
+    end_time = _parse_session_datetime(request.form.get('end_time'))
+
+    if not title or not location or not start_time or not end_time:
+        flash("Title, location, start time and end time are all required.", "danger")
+    elif end_time <= start_time:
+        flash("End time must be after start time.", "danger")
+    else:
+        start_changed = build_session.start_time != start_time
+        build_session.title = title
+        build_session.location = location
+        build_session.start_time = start_time
+        build_session.end_time = end_time
+
+        # If the session was moved, let the mentor reminder be sent again for the new time.
+        if start_changed:
+            SessionReminder.query.filter_by(session_id=build_session.id).delete()
+
+        db.session.commit()
+        flash(f"Updated \"{title}\".", "success")
+
+    return redirect(url_for('mentor_sessions'))
+
+@app.route('/mentor/sessions/<int:session_id>/delete', methods=['POST'])
+@role_required('mentor', 'admin')
+def mentor_delete_session(session_id):
+    build_session = BuildSession.query.get_or_404(session_id)
+
+    open_logs = AttendanceLog.query.filter_by(session_id=session_id, check_out=None).count()
+    if open_logs:
+        flash(f"Can't delete \"{build_session.title}\" while {open_logs} "
+              f"{'person is' if open_logs == 1 else 'people are'} still signed in to it.", "warning")
+        return redirect(url_for('mentor_sessions'))
+
+    title = build_session.title
+
+    # Absence reports for the session are removed along with it.
+    AbsenceNotice.query.filter_by(session_id=session_id).delete()
+    SessionReminder.query.filter_by(session_id=session_id).delete()
+
+    # Hours people already earned are kept: detach those logs from the session
+    # and leave a note so the history still says where they came from.
+    for log in AttendanceLog.query.filter_by(session_id=session_id).all():
+        log.session_id = None
+        if not log.note:
+            log.note = f"Deleted session: {title}"[:255]
+
+    db.session.delete(build_session)
+    db.session.commit()
+    flash(f"Deleted \"{title}\".", "success")
+    return redirect(url_for('mentor_sessions'))
+
+@app.route('/mentor/invite', methods=['POST'])
+@role_required('mentor', 'admin')
+def mentor_invite_students():
+    """Email every student a link to the portal and a short explanation of what it's for."""
+    if not smtp_configured():
+        flash("Email isn't set up yet. Add the SMTP settings to .env first.", "danger")
+        return redirect(url_for('mentor_sessions'))
+
+    students = User.query.filter_by(role='student').all()
+    subject = "Attendance system for build sessions"
+    messages = [
+        _make_message(u.email, subject, _invite_body(u.name or u.email, u.email))
+        for u in students if u.email
+    ]
+
+    if not messages:
+        flash("There are no students to invite yet.", "warning")
+        return redirect(url_for('mentor_sessions'))
+
+    try:
+        sent = send_emails(messages)
+    except Exception:
+        app.logger.exception("Could not connect to SMTP server to send invitations")
+        flash("Couldn't connect to the email server. Check the SMTP settings in .env.", "danger")
+        return redirect(url_for('mentor_sessions'))
+
+    if sent == len(messages):
+        flash(f"Invitation sent to {sent} student{'s' if sent != 1 else ''}.", "success")
+    else:
+        flash(f"Invitation sent to {sent} of {len(messages)} students. Check the server log for the failures.", "warning")
+    return redirect(url_for('mentor_sessions'))
 
 # Accepted formats for start_time / end_time columns in an imported CSV.
 _SESSION_DT_FORMATS = [

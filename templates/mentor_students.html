@@ -64,7 +64,7 @@
                             <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Manual Adjustment</span>
                             {% if log.note %}<div class="small text-muted mt-1">{{ log.note }}</div>{% endif %}
                             {% else %}
-                            {{ log.session.title if log.session else 'Unknown Session' }}
+                            {{ log.session.title if log.session else (log.note or 'Unknown Session') }}
                             {% endif %}
                         </td>
                         <td>{{ log.check_in.strftime('%Y-%m-%d %H:%M') if not log.is_manual else '—' }}</td>

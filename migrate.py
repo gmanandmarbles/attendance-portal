@@ -2,12 +2,15 @@
 """
 migrate.py — one-time schema migration for the attendance portal.
 
-Brings an existing robotics_attendance.db up to date with the current
-AttendanceLog model:
+Brings an existing robotics_attendance.db up to date with the current models:
   - adds attendance_log.note        (TEXT, nullable)
   - adds attendance_log.is_manual   (BOOLEAN, NOT NULL DEFAULT 0)
   - makes attendance_log.session_id nullable (needed for manual hour
-    adjustments that aren't tied to a real build session)
+    adjustments that aren't tied to a real build session, and for logs that
+    are kept after their build session is deleted)
+  - creates the session_reminder table (tracks which build sessions have
+    already had their mentor absence-reminder email handled, so it is never
+    sent twice)
 
 Safe to run more than once — it inspects the current schema first and
 does nothing if the database is already up to date. Always makes a
@@ -49,6 +52,12 @@ def get_columns(conn, table):
     return {row[1]: row for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
+def table_exists(conn, table):
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+    ).fetchone() is not None
+
+
 def backup_db(db_path: Path) -> Path:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = db_path.with_name(f"{db_path.stem}.backup_{stamp}{db_path.suffix}")
@@ -73,8 +82,9 @@ def migrate(db_path: Path, skip_confirm: bool = False):
     session_id_notnull = cols["session_id"][3] == 1  # PRAGMA table_info 'notnull' flag
     has_note = "note" in cols
     has_is_manual = "is_manual" in cols
+    has_reminder_table = table_exists(conn, "session_reminder")
 
-    if not session_id_notnull and has_note and has_is_manual:
+    if not session_id_notnull and has_note and has_is_manual and has_reminder_table:
         print(f"{db_path} is already up to date. No changes made.")
         conn.close()
         return
@@ -87,6 +97,8 @@ def migrate(db_path: Path, skip_confirm: bool = False):
         print("  + add attendance_log.is_manual")
     if session_id_notnull:
         print("  + make attendance_log.session_id nullable")
+    if not has_reminder_table:
+        print("  + create session_reminder table")
 
     if not skip_confirm:
         answer = input("\nProceed? [y/N] ").strip().lower()
@@ -106,6 +118,17 @@ def migrate(db_path: Path, skip_confirm: bool = False):
                 conn.execute(
                     "ALTER TABLE attendance_log ADD COLUMN is_manual BOOLEAN NOT NULL DEFAULT 0"
                 )
+
+            if not has_reminder_table:
+                conn.execute("""
+                    CREATE TABLE session_reminder (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        session_id INTEGER NOT NULL,
+                        sent_at DATETIME,
+                        UNIQUE (session_id),
+                        FOREIGN KEY(session_id) REFERENCES build_session (id)
+                    )
+                """)
 
             if session_id_notnull:
                 # SQLite can't drop a NOT NULL constraint with a plain ALTER TABLE,
@@ -139,6 +162,7 @@ def migrate(db_path: Path, skip_confirm: bool = False):
         print("\nMigration complete.")
         print("attendance_log columns now:", ", ".join(new_cols.keys()))
         print(f"attendance_log has {row_count} row(s) — verify this matches what you expected.")
+        print("session_reminder table present:", table_exists(conn, "session_reminder"))
 
     except Exception:
         print("\nSomething went wrong — restoring the original database from backup.")
