@@ -6,6 +6,25 @@
 <h3 class="mb-4">Admin Portal: User Management</h3>
 <p class="text-muted small mb-4">Edit a student or mentor's email, name, or barcode directly in the table below, then click <strong>Save</strong> on that row.</p>
 
+<!-- Printable ID Cards -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+        <h5 class="card-title mb-0">Printable ID Cards</h5>
+        <a href="{{ url_for('admin_id_cards') }}" class="btn btn-warning btn-sm fw-semibold">
+            &#128424; Download PDF ({{ users|length }} card{{ '' if users|length == 1 else 's' }})
+        </a>
+    </div>
+    <div class="card-body">
+        <p class="mb-2">Generates one ID card per user with their photo, name, and check-in barcode, laid out
+            <strong>{{ 8 }}</strong> to a page. Each card is drawn at exact credit-card size
+            (3.375&Prime; &times; 2.125&Prime;).</p>
+        <p class="mb-0 text-muted small">&#9888;&#65039; Print at <strong>100% / &ldquo;Actual size&rdquo;</strong>.
+            &ldquo;Fit to page&rdquo; and &ldquo;Shrink oversized pages&rdquo; will shrink the cards so they no
+            longer fit a badge holder. Cut along the hairline around each card. Users without a photo or barcode
+            still get a card, clearly marked, so the gaps are obvious.</p>
+    </div>
+</div>
+
 <!-- Account Provisioning Form -->
 <div class="card shadow-sm mb-4">
     <div class="card-header bg-dark text-white">

@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import (
     Flask, render_template, redirect, url_for, 
-    request, session, flash, jsonify, send_from_directory, abort
+    request, session, flash, jsonify, send_from_directory, abort, Response
 )
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import IntegrityError
@@ -21,6 +21,13 @@ from authlib.integrations.flask_client import OAuth
 from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
+from reportlab.graphics.barcode import code128
+from reportlab.lib.pagesizes import LETTER
+from reportlab.lib.units import inch
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfgen.canvas import Canvas
+from PIL import Image, ImageOps
 
 load_dotenv()
 
@@ -1079,6 +1086,443 @@ def admin_logs():
         page=page,
         total_pages=total_pages,
         total=total
+    )
+
+# ==========================================
+# ID CARD / BADGE PDF (ADMIN)
+# ==========================================
+# Prints every user as a printable badge: photo, name and check-in barcode.
+# Each badge is drawn at exactly ISO/IEC 7810 ID-1 size (3.375in x 2.125in),
+# the same dimensions as a normal credit card, so a trimmed card is a real card.
+# Nothing is scaled, so printing the sheet at 100% keeps that size exact.
+
+ID_CARD_WIDTH = 3.375 * inch        # 243.0 pt - ISO/IEC 7810 ID-1 ("credit card")
+ID_CARD_HEIGHT = 2.125 * inch       # 153.0 pt
+
+BADGE_PAGE = LETTER                 # US Letter, 612 x 792 pt
+BADGE_MARGIN_X = 0.5 * inch         # 36 pt left and right
+BADGE_MARGIN_TOP = 0.85 * inch      # 61.2 pt - leaves room for the print note
+BADGE_MARGIN_BOTTOM = 0.5 * inch    # 36 pt
+BADGE_COLUMNS = 2
+BADGE_ROWS = 4                      # 8 badges per sheet
+BADGE_PER_PAGE = BADGE_COLUMNS * BADGE_ROWS
+BADGE_CARD_PADDING = 9.0
+
+# Geometry inside one card, measured up from the card's bottom-left corner.
+BADGE_PHOTO_SIZE = 78.0
+BADGE_BARCODE_HEIGHT = 38.0
+BADGE_BARCODE_TEXT_SIZE = 8.0
+BADGE_NAME_SIZE = 12.5
+BADGE_NAME_LEADING = 14.0
+BADGE_NAME_MAX_LINES = 3
+BADGE_TEXT_GAP = 22.0              # card floor to the bottom of the barcode
+BADGE_PHOTO_GAP = 6.0              # barcode to portrait
+BADGE_MIN_TEXT_SIZE = 5.0          # never shrink the printed code below this
+
+BARCODE_QUIET_MODULES = 10          # Code 128's minimum quiet zone, in modules
+MIN_BARCODE_MODULE_WIDTH = 0.6      # pt (~0.21 mm); the Code 128 floor is ~0.54 pt
+
+
+def _card_layout(x, y):
+    """Every position inside one badge, given the card's bottom-left corner (x, y).
+
+    Stacked from the bottom up: the barcode's human-readable code, then the bars,
+    then the portrait, so nothing can be drawn on top of anything else."""
+    pad = BADGE_CARD_PADDING
+    text_baseline = y + pad + 2
+    bars_y = y + BADGE_TEXT_GAP
+    photo_x = x + pad
+    photo_y = bars_y + BADGE_BARCODE_HEIGHT + BADGE_PHOTO_GAP
+    name_x = photo_x + BADGE_PHOTO_SIZE + pad
+    return {
+        "text_baseline": text_baseline,
+        "bars_y": bars_y,
+        "photo_x": photo_x,
+        "photo_y": photo_y,
+        "photo_size": BADGE_PHOTO_SIZE,
+        "name_x": name_x,
+        "name_width": (x + ID_CARD_WIDTH - pad) - name_x,
+    }
+
+
+def _pdf_safe(text):
+    """Flatten text to something reportlab's built-in WinAnsi fonts can actually draw.
+    Photos and names come from user-supplied data, so a stray emoji or non-Latin
+    character would otherwise render as a black box or break the whole sheet."""
+    out = []
+    for ch in text or "":
+        if ord(ch) < 32 or ord(ch) == 127:
+            continue
+        try:
+            ch.encode("cp1252")
+        except UnicodeEncodeError:
+            ch = "?"
+        out.append(ch)
+    return " ".join("".join(out).split())
+
+
+def _wrap_lines(text, font_name, font_size, max_width, max_lines):
+    """Greedy word wrap for the name column.
+
+    Words too long to fit the column on their own (a long surname, or an email used
+    as a name) are split mid-word rather than allowed to run off the card, and
+    anything still dropped to stay within max_lines is marked with an ellipsis."""
+
+    def fits(candidate):
+        return pdfmetrics.stringWidth(candidate, font_name, font_size) <= max_width
+
+    # Reduce the text to the smallest pieces that each fit on a line.
+    atoms = []
+    for word in text.split():
+        if fits(word):
+            atoms.append(word)
+            continue
+        chunk = ""
+        for ch in word:
+            if chunk and not fits(chunk + ch):
+                atoms.append(chunk)
+                chunk = ch
+            else:
+                chunk += ch
+        if chunk:
+            atoms.append(chunk)
+
+    lines = []
+    current = ""
+    leftover = 0
+
+    for index, atom in enumerate(atoms):
+        candidate = atom if not current else f"{current} {atom}"
+        if current and not fits(candidate):
+            lines.append(current)
+            current = atom
+        else:
+            current = candidate
+        # current is still unplaced here, so hitting the line limit drops it.
+        if len(lines) == max_lines:
+            leftover = len(atoms) - index
+            break
+    else:
+        if current:
+            lines.append(current)
+
+    if leftover and lines:
+        last = lines[-1]
+        if not fits(last + "…") and " " in last:
+            trimmed = last.rsplit(" ", 1)[0]
+            if trimmed and fits(trimmed + "…"):
+                last = trimmed
+        # Drop trailing characters, not whole words, so a single unbroken word
+        # still gets marked as cut off.
+        while last and not fits(last + "…"):
+            last = last[:-1]
+        lines[-1] = last + "…"
+
+    return lines
+
+
+def _fit_text_font(text, font_name, max_size, max_width, min_size):
+    """Largest size at or below max_size that keeps text on one line, never below min_size."""
+    if not text:
+        return max_size
+    width = pdfmetrics.stringWidth(text, font_name, max_size)
+    if width <= max_width:
+        return max_size
+    return max(min_size, max_size * (max_width / width))
+
+
+def _truncate_to_width(text, font_name, font_size, max_width):
+    """Drop trailing characters (marked with an ellipsis) until the text fits one line."""
+    if pdfmetrics.stringWidth(text, font_name, font_size) <= max_width:
+        return text
+    trimmed = text
+    while trimmed and pdfmetrics.stringWidth(trimmed + "…", font_name, font_size) > max_width:
+        trimmed = trimmed[:-1]
+    return (trimmed + "…") if trimmed else ""
+
+
+def _code128_symbol(value, max_width):
+    """Validate a value and work out the geometry of its Code 128 symbol.
+
+    Returns (pattern, module_width, is_scannable). `pattern` is None when the value
+    can't be represented in Code 128 at all."""
+    try:
+        symbol = code128.Code128(value=value)
+        symbol.validate()
+        symbol.encode()   # populates the encoded symbols that decompose() reads
+        pattern = symbol.decompose()
+    except Exception:
+        return None, 0.0, False
+
+    modules = 0
+    for ch in pattern:
+        if "a" <= ch <= "f":
+            modules += ord(ch) - 96          # space, 1 to 6 modules wide
+        elif "A" <= ch <= "F":
+            modules += ord(ch) - 64          # bar, 1 to 6 modules wide
+
+    total = modules + (2 * BARCODE_QUIET_MODULES)
+    if total <= 0:
+        return None, 0.0, False
+
+    module_width = max_width / total
+    return pattern, module_width, module_width >= MIN_BARCODE_MODULE_WIDTH
+
+
+def _is_code128_encodable(value):
+    """Code 128 covers the full ASCII range but nothing else, and control characters
+    would produce a symbol no scanner should ever read. Anything outside printable
+    ASCII is shown as text instead of drawn as a barcode that wouldn't match the kiosk."""
+    return bool(value) and all(32 <= ord(ch) <= 126 for ch in value)
+
+
+def _draw_code128(pdf, value, x, y, max_width, height):
+    """Draw a Code 128 symbol with its bottom-left corner at (x, y), fitted to max_width.
+    The quiet zones are drawn inside max_width so the bars never touch the card edge."""
+    pattern, module_width, scannable = _code128_symbol(value, max_width)
+    if pattern is None:
+        return False
+
+    cursor = x + (BARCODE_QUIET_MODULES * module_width)
+    pdf.setFillColorRGB(0.04, 0.06, 0.10)
+    for ch in pattern:
+        if "a" <= ch <= "f":
+            cursor += (ord(ch) - 96) * module_width
+        elif "A" <= ch <= "F":
+            bar_width = (ord(ch) - 64) * module_width
+            pdf.rect(cursor, y, bar_width, height, stroke=0, fill=1)
+            cursor += bar_width
+
+    return scannable
+
+
+def _load_card_photo(photo_url):
+    """Load a user's photo, cropped square and downscaled for the badge. Returns a
+    reportlab ImageReader, or None if there's no photo or it can't be read."""
+    if not photo_url:
+        return None
+
+    upload_dir = os.path.abspath(app.config['UPLOAD_FOLDER'])
+    path = os.path.abspath(os.path.join(upload_dir, os.path.basename(photo_url)))
+    # A stored photo_url must never be able to point outside the upload folder.
+    if os.path.commonpath([path, upload_dir]) != upload_dir:
+        return None
+
+    try:
+        with Image.open(path) as src:
+            src.load()
+            # Phone photos store rotation in EXIF; without this the face ends up sideways.
+            image = ImageOps.exif_transpose(src) or src
+
+            side = min(image.size)
+            if side <= 0:
+                return None
+            # Crop from slightly above centre so heads survive a portrait-to-square trim.
+            left = (image.width - side) // 2
+            top = int((image.height - side) * 0.30)
+            image = image.crop((left, top, left + side, top + side))
+
+            image = image.convert("RGB").resize((400, 400), Image.LANCZOS)
+            buffer = io.BytesIO()
+            image.save(buffer, format="JPEG", quality=88, optimize=True)
+            buffer.seek(0)
+            return ImageReader(buffer)
+    except Exception:
+        app.logger.warning("Could not read photo %s for an ID card; using a placeholder.", photo_url)
+        return None
+
+
+def _initials(name):
+    """Up to two initials for the placeholder portrait."""
+    parts = [p for p in (name or "").split() if p]
+    if not parts:
+        return "?"
+    if len(parts) == 1:
+        return parts[0][0].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+def _badge_grid():
+    """Bottom-left corner of every badge slot on the sheet, row by row."""
+    page_width, page_height = BADGE_PAGE
+    usable_w = page_width - (2 * BADGE_MARGIN_X)
+    usable_h = page_height - BADGE_MARGIN_TOP - BADGE_MARGIN_BOTTOM
+    col_gap = (usable_w - (BADGE_COLUMNS * ID_CARD_WIDTH)) / (BADGE_COLUMNS - 1)
+    row_gap = (usable_h - (BADGE_ROWS * ID_CARD_HEIGHT)) / (BADGE_ROWS - 1)
+
+    slots = []
+    for row in range(BADGE_ROWS):
+        for col in range(BADGE_COLUMNS):
+            x = BADGE_MARGIN_X + (col * (ID_CARD_WIDTH + col_gap))
+            y = BADGE_MARGIN_BOTTOM + (row * (ID_CARD_HEIGHT + row_gap))
+            slots.append((x, y))
+    return slots
+
+
+def _draw_badge_sheet_notes(pdf, unscannable):
+    """The note above the first row of cards. The grid is identical on every page, so
+    this never shifts a card out of alignment. `unscannable` lists the barcode values
+    that are too long to fit at a width a scanner can read."""
+    pdf.setFont("Helvetica", 7)
+    pdf.setFillColorRGB(0.42, 0.47, 0.55)
+    pdf.drawString(
+        BADGE_MARGIN_X,
+        BADGE_PAGE[1] - (BADGE_MARGIN_TOP - 12),
+        "ID cards are credit-card sized - print at 100% / \"Actual size\". "
+        "Do not use \"Fit to page\" or \"Shrink oversized pages\"."
+    )
+
+    if unscannable:
+        pdf.setFillColorRGB(0.72, 0.15, 0.15)
+        pdf.drawString(
+            BADGE_MARGIN_X,
+            BADGE_PAGE[1] - (BADGE_MARGIN_TOP - 22),
+            f"{len(unscannable)} barcode(s) are too long to fit at a scannable width - "
+            "key in the printed code below the bars, or shorten the barcode."
+        )
+
+
+def _draw_id_card(pdf, user, x, y):
+    """Draw one credit-card-sized badge with its bottom-left corner at (x, y)."""
+    display_name = _pdf_safe(user.name) or _pdf_safe(user.email)
+    barcode_value = _pdf_safe(user.barcode)
+    role = _pdf_safe(user.role).upper()
+    box = _card_layout(x, y)
+
+    pad = BADGE_CARD_PADDING
+    text_baseline = box["text_baseline"]
+    bars_y = box["bars_y"]
+    photo_x = box["photo_x"]
+    photo_y = box["photo_y"]
+    name_x = box["name_x"]
+    name_width = box["name_width"]
+
+    pdf.saveState()
+
+    # Card face. The hairline doubles as the cut guide.
+    pdf.setFillColorRGB(1, 1, 1)
+    pdf.setStrokeColorRGB(0.78, 0.82, 0.88)
+    pdf.setLineWidth(0.6)
+    pdf.rect(x, y, ID_CARD_WIDTH, ID_CARD_HEIGHT, stroke=1, fill=1)
+
+    # Portrait
+    photo = _load_card_photo(user.photo_url)
+    if photo is not None:
+        pdf.drawImage(photo, photo_x, photo_y, BADGE_PHOTO_SIZE, BADGE_PHOTO_SIZE)
+        pdf.setStrokeColorRGB(0.78, 0.82, 0.88)
+        pdf.setLineWidth(0.6)
+        pdf.rect(photo_x, photo_y, BADGE_PHOTO_SIZE, BADGE_PHOTO_SIZE, stroke=1, fill=0)
+    else:
+        pdf.setFillColorRGB(0.93, 0.95, 0.97)
+        pdf.setStrokeColorRGB(0.80, 0.84, 0.90)
+        pdf.rect(photo_x, photo_y, BADGE_PHOTO_SIZE, BADGE_PHOTO_SIZE, stroke=1, fill=1)
+        pdf.setFillColorRGB(0.55, 0.60, 0.68)
+        pdf.setFont("Helvetica-Bold", 26)
+        pdf.drawCentredString(
+            photo_x + (BADGE_PHOTO_SIZE / 2),
+            photo_y + (BADGE_PHOTO_SIZE / 2) - 9,
+            _initials(display_name)
+        )
+
+    # Name, optically centred against the portrait
+    lines = _wrap_lines(display_name, "Helvetica-Bold", BADGE_NAME_SIZE, name_width, BADGE_NAME_MAX_LINES)
+    first_baseline = photo_y + ((BADGE_PHOTO_SIZE - (len(lines) * BADGE_NAME_LEADING)) / 2) + (BADGE_NAME_LEADING * 0.75)
+    pdf.setFillColorRGB(0.06, 0.09, 0.16)
+    pdf.setFont("Helvetica-Bold", BADGE_NAME_SIZE)
+    for offset, line in enumerate(lines):
+        pdf.drawString(name_x, first_baseline - (offset * BADGE_NAME_LEADING), line)
+
+    if role:
+        pdf.setFont("Helvetica", 7)
+        pdf.setFillColorRGB(0.42, 0.47, 0.55)
+        pdf.drawString(name_x, photo_y - 2, role)
+
+    # Check-in barcode, as wide as the card allows
+    usable_width = ID_CARD_WIDTH - (2 * pad)
+    if _is_code128_encodable(barcode_value):
+        _draw_code128(pdf, barcode_value, x + pad, bars_y, usable_width, BADGE_BARCODE_HEIGHT)
+
+    # Human-readable value, always printed so a badge is never unidentifiable.
+    # Long codes are shrunk, then ellipsized, so they can never run off the card.
+    printed = barcode_value or _pdf_safe(user.email)
+    text_size = _fit_text_font(printed, "Helvetica-Bold", BADGE_BARCODE_TEXT_SIZE, usable_width, BADGE_MIN_TEXT_SIZE)
+    printed = _truncate_to_width(printed, "Helvetica-Bold", text_size, usable_width)
+
+    if barcode_value:
+        pdf.setFillColorRGB(0.06, 0.09, 0.16)
+    else:
+        pdf.setFillColorRGB(0.93, 0.95, 0.97)
+        pdf.setStrokeColorRGB(0.72, 0.15, 0.15)
+        pdf.setLineWidth(0.8)
+        pdf.rect(x + pad, bars_y, usable_width, BADGE_BARCODE_HEIGHT, stroke=1, fill=1)
+        pdf.setFillColorRGB(0.72, 0.15, 0.15)
+        pdf.setFont("Helvetica-Bold", 11)
+        pdf.drawCentredString(x + (ID_CARD_WIDTH / 2), bars_y + (BADGE_BARCODE_HEIGHT / 2) - 4, "NO BARCODE ASSIGNED")
+        pdf.setFillColorRGB(0.42, 0.47, 0.55)
+
+    pdf.setFont("Helvetica-Bold", text_size)
+    pdf.drawCentredString(x + (ID_CARD_WIDTH / 2), text_baseline, printed)
+
+    pdf.restoreState()
+
+
+def _user_badge_sort_key(user):
+    """Sort by last name then first name so the printed sheet is alphabetical.
+    Users with no name on file are parked at the end, where the gap is easy to spot."""
+    parts = _pdf_safe(user.name).split()
+    email = (user.email or "").casefold()
+    if not parts:
+        return (1, "", "", email)
+    return (0, parts[-1].casefold(), parts[0].casefold(), email)
+
+
+def _build_id_card_pdf(users):
+    """Build the badge sheet PDF for the given users."""
+    users = sorted(users, key=_user_badge_sort_key)
+    slots = _badge_grid()
+
+    # Measured up front so the warnings can be printed in the page 1 margin.
+    unscannable = []
+    for user in users:
+        value = _pdf_safe(user.barcode)
+        if not _is_code128_encodable(value):
+            continue  # the card itself already flags a missing barcode
+        _, _, scannable = _code128_symbol(value, ID_CARD_WIDTH - (2 * BADGE_CARD_PADDING))
+        if not scannable:
+            unscannable.append(value)
+
+    buffer = io.BytesIO()
+    pdf = Canvas(buffer, pagesize=BADGE_PAGE)
+    pdf.setTitle("ID Cards - Robotics Attendance Portal")
+    pdf.setAuthor("Robotics Attendance Portal")
+    pdf.setSubject("Credit-card sized check-in badges - print at 100% (actual size)")
+
+    for index, user in enumerate(users):
+        slot = index % BADGE_PER_PAGE
+        if slot == 0:
+            if index:
+                pdf.showPage()
+            else:
+                _draw_badge_sheet_notes(pdf, unscannable)
+        _draw_id_card(pdf, user, *slots[slot])
+
+    pdf.save()
+    return buffer.getvalue()
+
+
+@app.route('/admin/id-cards.pdf')
+@role_required('admin')
+def admin_id_cards():
+    """Download a printable sheet of credit-card sized ID cards, one per user."""
+    users = User.query.order_by(User.id).all()
+    if not users:
+        abort(404)
+
+    filename = f"id-cards-{get_local_now():%Y-%m-%d}.pdf"
+    return Response(
+        _build_id_card_pdf(users),
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 # ==========================================

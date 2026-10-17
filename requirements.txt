@@ -4,3 +4,5 @@ Authlib
 requests
 Werkzeug
 python-dotenv
+reportlab
+Pillow
