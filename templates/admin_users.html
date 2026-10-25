@@ -10,9 +10,14 @@
 <div class="card shadow-sm mb-4">
     <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
         <h5 class="card-title mb-0">Printable ID Cards</h5>
-        <a href="{{ url_for('admin_id_cards') }}" class="btn btn-warning btn-sm fw-semibold">
-            &#128424; Download PDF ({{ users|length }} card{{ '' if users|length == 1 else 's' }})
-        </a>
+        <div>
+            <a href="{{ url_for('admin_print_center') }}" class="btn btn-outline-light btn-sm fw-semibold me-1">
+                Print Center (booklet &amp; scan-to-select)
+            </a>
+            <a href="{{ url_for('admin_id_cards') }}" class="btn btn-warning btn-sm fw-semibold">
+                &#128424; Download PDF ({{ users|length }} card{{ '' if users|length == 1 else 's' }})
+            </a>
+        </div>
     </div>
     <div class="card-body">
         <p class="mb-2">Generates one ID card per user with their photo, name, and check-in barcode, laid out

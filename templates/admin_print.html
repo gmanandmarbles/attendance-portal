@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+
+{% block title %}Print Center{% endblock %}
+
+{% block content %}
+<h3 class="mb-1">Admin Portal: Print Center</h3>
+<p class="text-muted small mb-4">Print an alphabetical barcode booklet, then scan barcodes to choose exactly whose ID cards to print.</p>
+
+<!-- ========== BARCODE BOOKLET ========== -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-dark text-white">
+        <h5 class="card-title mb-0">&#128214; Barcode Booklet</h5>
+    </div>
+    <div class="card-body">
+        <p class="mb-3">An alphabetical (by last name) directory of everyone's name and check-in barcode, 30 people to a page,
+            with the first and last surname shown at the top of each page. Scan a code straight off the booklet into the
+            ID card builder below.</p>
+        <form method="GET" action="{{ url_for('admin_booklet') }}" class="row g-2 align-items-end">
+            <div class="col-sm-4 col-md-3">
+                <label class="form-label fw-bold" for="bookletRole">Include</label>
+                <select name="role" id="bookletRole" class="form-select">
+                    <option value="">Everyone ({{ total }})</option>
+                    <option value="student">Students only</option>
+                    <option value="mentor">Mentors only</option>
+                    <option value="admin">Admins only</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-warning fw-semibold">&#128424; Download Booklet PDF</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ========== ID CARD BATCH BUILDER ========== -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-dark text-white">
+        <h5 class="card-title mb-0">&#129706; ID Card Batch</h5>
+    </div>
+    <div class="card-body">
+        <div class="row g-4">
+            <!-- Left: ways to add people -->
+            <div class="col-lg-5">
+                <label class="form-label fw-bold" for="scanInput">Scan a barcode</label>
+                <input type="text" id="scanInput" class="form-control form-control-lg" autocomplete="off"
+                       autofocus placeholder="Scan here, or type a code and press Enter">
+                <div id="scanStatus" class="small mt-2" style="min-height: 1.5em;" aria-live="polite"></div>
+
+                <hr>
+
+                <label class="form-label fw-bold" for="searchInput">Or search by name / email</label>
+                <input type="text" id="searchInput" class="form-control" autocomplete="off" placeholder="Start typing a name...">
+                <div id="searchResults" class="list-group mt-2"></div>
+            </div>
+
+            <!-- Right: the batch -->
+            <div class="col-lg-7">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="mb-0 fw-bold">Cards to print: <span id="batchCount" class="badge bg-primary">0</span></h6>
+                    <button type="button" id="clearBtn" class="btn btn-sm btn-outline-danger">Clear all</button>
+                </div>
+
+                <div class="table-responsive border rounded" style="max-height: 340px; overflow-y: auto;">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead class="table-light" style="position: sticky; top: 0;">
+                            <tr><th>Name</th><th>Role</th><th>Barcode</th><th style="width: 40px;"></th></tr>
+                        </thead>
+                        <tbody id="batchBody">
+                            <tr id="emptyRow"><td colspan="4" class="text-muted text-center py-4">Nobody yet. Scan a barcode to begin.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <form method="POST" action="{{ url_for('admin_id_cards') }}" id="printForm" class="mt-3">
+                    <input type="hidden" name="ids" id="idsField" value="">
+                    <button type="submit" id="printBtn" class="btn btn-warning fw-semibold" disabled>
+                        &#128424; Download ID Cards PDF
+                    </button>
+                    <span class="text-muted small ms-2">Print at 100% / &ldquo;Actual size&rdquo;. 8 cards per page, sorted alphabetically.</span>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<p class="text-muted small">
+    Prefer all cards at once? <a href="{{ url_for('admin_id_cards') }}">Download one card for every user</a>.
+</p>
+
+<script>
+(function () {
+    const ROSTER = {{ roster|tojson }};
+    const byId = new Map(ROSTER.map(u => [u.id, u]));
+    const byBarcode = new Map();
+    const byBarcodeLower = new Map();
+    ROSTER.forEach(u => {
+        if (u.barcode) {
+            byBarcode.set(u.barcode, u);
+            byBarcodeLower.set(u.barcode.toLowerCase(), u);
+        }
+    });
+
+    let batch = [];   // user ids, in the order they were added
+
+    const scanInput = document.getElementById('scanInput');
+    const scanStatus = document.getElementById('scanStatus');
+    const searchInput = document.getElementById('searchInput');
+    const searchResults = document.getElementById('searchResults');
+    const batchBody = document.getElementById('batchBody');
+    const batchCount = document.getElementById('batchCount');
+    const idsField = document.getElementById('idsField');
+    const printBtn = document.getElementById('printBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    function label(u) { return u.name || u.email; }
+
+    function say(text, kind) {
+        scanStatus.textContent = text;
+        scanStatus.className = 'small mt-2 fw-semibold text-' + kind;
+    }
+
+    function cell(text, cls) {
+        const td = document.createElement('td');
+        td.textContent = text;
+        if (cls) td.className = cls;
+        return td;
+    }
+
+    function render() {
+        batchBody.textContent = '';
+        if (!batch.length) {
+            const tr = document.createElement('tr');
+            const td = cell('Nobody yet. Scan a barcode to begin.', 'text-muted text-center py-4');
+            td.colSpan = 4;
+            tr.appendChild(td);
+            batchBody.appendChild(tr);
+        }
+        batch.forEach(id => {
+            const u = byId.get(id);
+            const tr = document.createElement('tr');
+            tr.appendChild(cell(label(u)));
+            tr.appendChild(cell(u.role, 'text-capitalize'));
+            tr.appendChild(cell(u.barcode || 'none', u.barcode ? 'font-monospace' : 'text-danger'));
+            const rm = document.createElement('td');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-sm btn-outline-secondary py-0 px-2';
+            btn.textContent = '\u00d7';
+            btn.title = 'Remove';
+            btn.addEventListener('click', () => { batch = batch.filter(x => x !== id); render(); });
+            rm.appendChild(btn);
+            tr.appendChild(rm);
+            batchBody.appendChild(tr);
+        });
+        batchCount.textContent = batch.length;
+        idsField.value = batch.join(',');
+        printBtn.disabled = batch.length === 0;
+    }
+
+    function add(u) {
+        if (batch.includes(u.id)) return false;
+        batch.push(u.id);
+        render();
+        return true;
+    }
+
+    // ----- barcode scanner (acts like a keyboard that types the code then presses Enter) -----
+    scanInput.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const code = scanInput.value.trim();
+        scanInput.value = '';
+        if (!code) return;
+
+        const u = byBarcode.get(code) || byBarcodeLower.get(code.toLowerCase());
+        if (!u) {
+            say('\u2716 "' + code + '" is not assigned to anyone.', 'danger');
+        } else if (add(u)) {
+            say('\u2714 Added ' + label(u), 'success');
+        } else {
+            say('\u2022 ' + label(u) + ' is already in the batch.', 'warning');
+        }
+        scanInput.focus();
+    });
+
+    // ----- name search -----
+    function renderSearch() {
+        const q = searchInput.value.trim().toLowerCase();
+        searchResults.textContent = '';
+        if (!q) return;
+        const matches = ROSTER.filter(u =>
+            (u.name + ' ' + u.email).toLowerCase().includes(q)).slice(0, 8);
+        if (!matches.length) {
+            const none = document.createElement('div');
+            none.className = 'list-group-item text-muted small';
+            none.textContent = 'No matches.';
+            searchResults.appendChild(none);
+            return;
+        }
+        matches.forEach(u => {
+            const inBatch = batch.includes(u.id);
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
+            btn.disabled = inBatch;
+            const left = document.createElement('span');
+            left.textContent = label(u);
+            const right = document.createElement('span');
+            right.className = 'small text-muted';
+            right.textContent = inBatch ? 'added' : (u.barcode || 'no barcode');
+            btn.appendChild(left);
+            btn.appendChild(right);
+            btn.addEventListener('click', () => { add(u); renderSearch(); });
+            searchResults.appendChild(btn);
+        });
+    }
+    searchInput.addEventListener('input', renderSearch);
+
+    clearBtn.addEventListener('click', () => {
+        if (batch.length && !confirm('Remove everyone from the batch?')) return;
+        batch = [];
+        render();
+        renderSearch();
+        scanInput.focus();
+    });
+
+    render();
+})();
+</script>
+{% endblock %}

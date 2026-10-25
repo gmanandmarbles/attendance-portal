@@ -1241,11 +1241,12 @@ def _truncate_to_width(text, font_name, font_size, max_width):
     return (trimmed + "…") if trimmed else ""
 
 
-def _code128_symbol(value, max_width):
+def _code128_symbol(value, max_width, max_module_width=None):
     """Validate a value and work out the geometry of its Code 128 symbol.
 
     Returns (pattern, module_width, is_scannable). `pattern` is None when the value
-    can't be represented in Code 128 at all."""
+    can't be represented in Code 128 at all. `max_module_width` stops short codes
+    from being stretched to fill max_width (used by the booklet)."""
     try:
         symbol = code128.Code128(value=value)
         symbol.validate()
@@ -1266,6 +1267,8 @@ def _code128_symbol(value, max_width):
         return None, 0.0, False
 
     module_width = max_width / total
+    if max_module_width:
+        module_width = min(module_width, max_module_width)
     return pattern, module_width, module_width >= MIN_BARCODE_MODULE_WIDTH
 
 
@@ -1276,10 +1279,10 @@ def _is_code128_encodable(value):
     return bool(value) and all(32 <= ord(ch) <= 126 for ch in value)
 
 
-def _draw_code128(pdf, value, x, y, max_width, height):
+def _draw_code128(pdf, value, x, y, max_width, height, max_module_width=None):
     """Draw a Code 128 symbol with its bottom-left corner at (x, y), fitted to max_width.
     The quiet zones are drawn inside max_width so the bars never touch the card edge."""
-    pattern, module_width, scannable = _code128_symbol(value, max_width)
+    pattern, module_width, scannable = _code128_symbol(value, max_width, max_module_width)
     if pattern is None:
         return False
 
@@ -1343,7 +1346,7 @@ def _initials(name):
 
 
 def _badge_grid():
-    """Bottom-left corner of every badge slot on the sheet, row by row."""
+    """Bottom-left corner of every badge slot on the sheet, top row first."""
     page_width, page_height = BADGE_PAGE
     usable_w = page_width - (2 * BADGE_MARGIN_X)
     usable_h = page_height - BADGE_MARGIN_TOP - BADGE_MARGIN_BOTTOM
@@ -1351,10 +1354,12 @@ def _badge_grid():
     row_gap = (usable_h - (BADGE_ROWS * ID_CARD_HEIGHT)) / (BADGE_ROWS - 1)
 
     slots = []
+    # Top row first, so cards read left-to-right, top-to-bottom and a partly filled
+    # sheet leaves its blank space at the bottom.
     for row in range(BADGE_ROWS):
         for col in range(BADGE_COLUMNS):
             x = BADGE_MARGIN_X + (col * (ID_CARD_WIDTH + col_gap))
-            y = BADGE_MARGIN_BOTTOM + (row * (ID_CARD_HEIGHT + row_gap))
+            y = BADGE_MARGIN_BOTTOM + ((BADGE_ROWS - 1 - row) * (ID_CARD_HEIGHT + row_gap))
             slots.append((x, y))
     return slots
 
@@ -1427,6 +1432,8 @@ def _draw_id_card(pdf, user, x, y):
     # Name, optically centred against the portrait
     lines = _wrap_lines(display_name, "Helvetica-Bold", BADGE_NAME_SIZE, name_width, BADGE_NAME_MAX_LINES)
     first_baseline = photo_y + ((BADGE_PHOTO_SIZE - (len(lines) * BADGE_NAME_LEADING)) / 2) + (BADGE_NAME_LEADING * 0.75)
+    if len(lines) >= BADGE_NAME_MAX_LINES:
+        first_baseline += 6   # lift a full-height name block clear of the role label below it
     pdf.setFillColorRGB(0.06, 0.09, 0.16)
     pdf.setFont("Helvetica-Bold", BADGE_NAME_SIZE)
     for offset, line in enumerate(lines):
@@ -1510,20 +1517,262 @@ def _build_id_card_pdf(users):
     return buffer.getvalue()
 
 
-@app.route('/admin/id-cards.pdf')
-@role_required('admin')
-def admin_id_cards():
-    """Download a printable sheet of credit-card sized ID cards, one per user."""
-    users = User.query.order_by(User.id).all()
-    if not users:
-        abort(404)
+def _parse_id_list(raw_values):
+    """Turn form/query values like ["3,7", "12"] into a de-duplicated list of ints,
+    keeping the order they were given in. Anything that isn't a number is ignored."""
+    seen = set()
+    ids = []
+    for raw in raw_values:
+        for piece in str(raw).split(","):
+            piece = piece.strip()
+            if piece.isdigit():
+                value = int(piece)
+                if value not in seen:
+                    seen.add(value)
+                    ids.append(value)
+    return ids
 
-    filename = f"id-cards-{get_local_now():%Y-%m-%d}.pdf"
+
+def _pdf_response(pdf_bytes, filename):
     return Response(
-        _build_id_card_pdf(users),
+        pdf_bytes,
         mimetype="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.route('/admin/id-cards.pdf', methods=['GET', 'POST'])
+@role_required('admin')
+def admin_id_cards():
+    """Download a printable sheet of credit-card sized ID cards.
+
+    GET             -> one card for every user (original behaviour).
+    POST with `ids` -> cards only for the chosen users (the Print Center batch)."""
+    if request.method == 'POST':
+        ids = _parse_id_list(request.form.getlist('ids'))
+        if not ids:
+            flash("No one was selected. Scan or add at least one person first.", "warning")
+            return redirect(url_for('admin_print_center'))
+        users = User.query.filter(User.id.in_(ids)).all()
+        if not users:
+            flash("None of the selected users could be found.", "danger")
+            return redirect(url_for('admin_print_center'))
+        label = f"id-cards-selected-{len(users)}"
+    else:
+        users = User.query.order_by(User.id).all()
+        if not users:
+            abort(404)
+        label = "id-cards"
+
+    filename = f"{label}-{get_local_now():%Y-%m-%d}.pdf"
+    return _pdf_response(_build_id_card_pdf(users), filename)
+
+
+# ==========================================
+# BARCODE BOOKLET PDF (ADMIN)
+# ==========================================
+# An alphabetical "phone book" of everyone's name and check-in barcode. Entries run
+# down the left column then the right, with the first and last surname on each page
+# in the header, so a person can be found quickly. Scanning a code straight off the
+# booklet into the Print Center adds that person to an ID card batch.
+
+BOOKLET_PAGE = LETTER
+BOOKLET_MARGIN_X = 0.5 * inch
+BOOKLET_MARGIN_TOP = 0.95 * inch
+BOOKLET_MARGIN_BOTTOM = 0.65 * inch
+BOOKLET_COLUMNS = 2
+BOOKLET_ROWS = 15                      # entries per column
+BOOKLET_PER_PAGE = BOOKLET_COLUMNS * BOOKLET_ROWS
+BOOKLET_COLUMN_GAP = 0.25 * inch
+BOOKLET_CELL_PADDING = 5.0
+BOOKLET_NAME_WIDTH = 96.0
+BOOKLET_BARCODE_HEIGHT = 22.0
+BOOKLET_MAX_MODULE_WIDTH = 1.0         # pt; keeps short codes from stretching huge
+BOOKLET_ROLE_FILTERS = ('student', 'mentor', 'admin')
+
+
+def _booklet_display_name(user):
+    """'Last, First Middle' so the alphabetical order is obvious at a glance."""
+    parts = _pdf_safe(user.name).split()
+    if len(parts) >= 2:
+        return f"{parts[-1]}, {' '.join(parts[:-1])}"
+    return parts[0] if parts else _pdf_safe(user.email)
+
+
+def _booklet_guide_word(user):
+    parts = _pdf_safe(user.name).split()
+    return parts[-1] if parts else _pdf_safe(user.email)
+
+
+def _draw_booklet_entry(pdf, user, x, row_top, row_height, cell_width):
+    """One name + barcode entry. (x, row_top) is the cell's top-left corner."""
+    pad = BOOKLET_CELL_PADDING
+    row_bottom = row_top - row_height
+
+    # Hairline under every entry
+    pdf.setStrokeColorRGB(0.85, 0.88, 0.92)
+    pdf.setLineWidth(0.5)
+    pdf.line(x, row_bottom, x + cell_width, row_bottom)
+
+    # Name (wraps to two lines, then ellipsis)
+    name = _booklet_display_name(user)
+    lines = _wrap_lines(name, "Helvetica-Bold", 9.5, BOOKLET_NAME_WIDTH, 2)
+    pdf.setFillColorRGB(0.06, 0.09, 0.16)
+    pdf.setFont("Helvetica-Bold", 9.5)
+    for offset, line in enumerate(lines):
+        pdf.drawString(x + pad, row_top - 14 - (offset * 11), line)
+
+    role = _pdf_safe(user.role).upper()
+    if role:
+        pdf.setFont("Helvetica", 6.5)
+        pdf.setFillColorRGB(0.42, 0.47, 0.55)
+        pdf.drawString(x + pad, row_bottom + 6, role)
+
+    # Barcode block, to the right of the name
+    block_x = x + pad + BOOKLET_NAME_WIDTH + pad
+    block_w = (x + cell_width - pad) - block_x
+    bars_y = row_bottom + 15
+    code = _pdf_safe(user.barcode)
+
+    if not code:
+        pdf.setFillColorRGB(0.72, 0.15, 0.15)
+        pdf.setFont("Helvetica-Bold", 8)
+        pdf.drawString(block_x, row_bottom + (row_height / 2) - 3, "NO BARCODE ASSIGNED")
+        return
+
+    drawn = False
+    text_x = block_x
+    if _is_code128_encodable(code):
+        _, module_width, scannable = _code128_symbol(code, block_w, BOOKLET_MAX_MODULE_WIDTH)
+        if scannable:
+            _draw_code128(pdf, code, block_x, bars_y, block_w, BOOKLET_BARCODE_HEIGHT, BOOKLET_MAX_MODULE_WIDTH)
+            drawn = True
+            text_x = block_x + (BARCODE_QUIET_MODULES * module_width)   # line up with the first bar
+
+    text_size = _fit_text_font(code, "Helvetica-Bold", 7.5, block_w, 5.0)
+    printed = _truncate_to_width(code, "Helvetica-Bold", text_size, block_w)
+    pdf.setFillColorRGB(0.06, 0.09, 0.16)
+    pdf.setFont("Helvetica-Bold", text_size)
+    pdf.drawString(text_x, row_bottom + 5, printed)
+    if not drawn:
+        pdf.setFillColorRGB(0.72, 0.15, 0.15)
+        pdf.setFont("Helvetica", 6.5)
+        pdf.drawString(block_x, row_bottom + 16, "Too long / unsupported - type this code in")
+
+
+def _build_booklet_pdf(users, role_label):
+    """Build the alphabetical barcode booklet for the given users."""
+    users = sorted(users, key=_user_badge_sort_key)
+    page_w, page_h = BOOKLET_PAGE
+    total_pages = max(1, (len(users) + BOOKLET_PER_PAGE - 1) // BOOKLET_PER_PAGE)
+
+    usable_w = page_w - (2 * BOOKLET_MARGIN_X)
+    cell_width = (usable_w - ((BOOKLET_COLUMNS - 1) * BOOKLET_COLUMN_GAP)) / BOOKLET_COLUMNS
+    row_height = (page_h - BOOKLET_MARGIN_TOP - BOOKLET_MARGIN_BOTTOM) / BOOKLET_ROWS
+    grid_top = page_h - BOOKLET_MARGIN_TOP
+
+    buffer = io.BytesIO()
+    pdf = Canvas(buffer, pagesize=BOOKLET_PAGE)
+    pdf.setTitle("Barcode Booklet - Robotics Attendance Portal")
+    pdf.setAuthor("Robotics Attendance Portal")
+    pdf.setSubject("Alphabetical directory of names and check-in barcodes")
+
+    printed_on = get_local_now().strftime('%B %d, %Y').replace(' 0', ' ')
+
+    for page_index in range(total_pages):
+        chunk = users[page_index * BOOKLET_PER_PAGE:(page_index + 1) * BOOKLET_PER_PAGE]
+
+        # Header
+        pdf.setFillColorRGB(0.06, 0.09, 0.16)
+        pdf.setFont("Helvetica-Bold", 15)
+        pdf.drawString(BOOKLET_MARGIN_X, page_h - 40, "Barcode Directory")
+        pdf.setFont("Helvetica", 8)
+        pdf.setFillColorRGB(0.42, 0.47, 0.55)
+        pdf.drawString(
+            BOOKLET_MARGIN_X, page_h - 53,
+            f"{role_label} - {len(users)} {'person' if len(users) == 1 else 'people'} - printed {printed_on}"
+        )
+        pdf.setFont("Helvetica", 8)
+        pdf.drawRightString(page_w - BOOKLET_MARGIN_X, page_h - 40, f"Page {page_index + 1} of {total_pages}")
+
+        if chunk:
+            first, last = _booklet_guide_word(chunk[0]), _booklet_guide_word(chunk[-1])
+            guide = first if first.casefold() == last.casefold() else f"{first}  -  {last}"
+            guide = _truncate_to_width(guide, "Helvetica-Bold", 11, 230)
+            pdf.setFillColorRGB(0.06, 0.09, 0.16)
+            pdf.setFont("Helvetica-Bold", 11)
+            pdf.drawRightString(page_w - BOOKLET_MARGIN_X, page_h - 54, guide)
+
+        pdf.setStrokeColorRGB(0.06, 0.09, 0.16)
+        pdf.setLineWidth(1)
+        pdf.line(BOOKLET_MARGIN_X, grid_top + 8, page_w - BOOKLET_MARGIN_X, grid_top + 8)
+
+        # Column divider
+        divider_x = BOOKLET_MARGIN_X + cell_width + (BOOKLET_COLUMN_GAP / 2)
+        pdf.setStrokeColorRGB(0.85, 0.88, 0.92)
+        pdf.setLineWidth(0.5)
+        pdf.line(divider_x, grid_top + 8, divider_x, BOOKLET_MARGIN_BOTTOM)
+
+        # Entries fill the left column top-to-bottom, then the right (like a phone book)
+        for i, user in enumerate(chunk):
+            col, row = divmod(i, BOOKLET_ROWS)
+            x = BOOKLET_MARGIN_X + col * (cell_width + BOOKLET_COLUMN_GAP)
+            _draw_booklet_entry(pdf, user, x, grid_top - (row * row_height), row_height, cell_width)
+
+        # Footer
+        pdf.setFont("Helvetica", 7)
+        pdf.setFillColorRGB(0.42, 0.47, 0.55)
+        pdf.drawString(
+            BOOKLET_MARGIN_X, BOOKLET_MARGIN_BOTTOM - 24,
+            "Tip: scan a barcode from this booklet into Admin > Print Center to add that person to an ID card batch."
+        )
+        pdf.showPage()
+
+    pdf.save()
+    return buffer.getvalue()
+
+
+@app.route('/admin/booklet.pdf')
+@role_required('admin')
+def admin_booklet():
+    """Download the alphabetical name + barcode booklet. ?role=student|mentor|admin filters."""
+    role_filter = request.args.get('role', '').strip().lower()
+    query = User.query
+    if role_filter in BOOKLET_ROLE_FILTERS:
+        query = query.filter(User.role == role_filter)
+        role_label = f"{role_filter.capitalize()}s"
+    else:
+        role_filter = ''
+        role_label = "Everyone"
+
+    users = query.all()
+    if not users:
+        flash("There is nobody to put in the booklet for that filter.", "warning")
+        return redirect(url_for('admin_print_center'))
+
+    suffix = f"-{role_filter}s" if role_filter else ""
+    filename = f"barcode-booklet{suffix}-{get_local_now():%Y-%m-%d}.pdf"
+    return _pdf_response(_build_booklet_pdf(users, role_label), filename)
+
+
+@app.route('/admin/print')
+@role_required('admin')
+def admin_print_center():
+    """One place to print the booklet and to build a custom batch of ID cards by
+    scanning barcodes (or searching for names)."""
+    users = sorted(User.query.all(), key=_user_badge_sort_key)
+    roster = [
+        {
+            "id": u.id,
+            "name": u.name or "",
+            "email": u.email,
+            "role": u.role,
+            "barcode": u.barcode or "",
+            "has_photo": bool(u.photo_url),
+        }
+        for u in users
+    ]
+    return render_template('admin_print.html', roster=roster, total=len(roster))
 
 # ==========================================
 # KIOSK ENGINE (BARCODE CHECK-IN/OUT)
