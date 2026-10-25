@@ -223,6 +223,30 @@
             background-color: #1d4ed8;
         }
 
+        .setup-modal button.secondary {
+            margin-top: 0.6rem;
+            background-color: transparent;
+            border: 1px solid #475569;
+            color: #94a3b8;
+        }
+
+        .setup-modal button.secondary:hover {
+            background-color: #334155;
+        }
+
+        #nameError {
+            min-height: 1.4em;
+            margin-bottom: 0.75rem;
+            color: #f87171;
+            font-size: 0.9rem;
+        }
+
+        #nameModal input {
+            font-size: 1.25rem;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
         .hidden {
             display: none !important;
         }
@@ -258,13 +282,33 @@
         </div>
     </div>
 
+    <!-- Shown after a visitor badge is scanned: asks who is signing in -->
+    <div id="nameOverlay" class="setup-overlay hidden">
+        <div class="setup-modal" id="nameModal">
+            <h2>Welcome, visitor!</h2>
+            <p style="color: #94a3b8; font-size: 0.95rem; margin-top: 0.5rem;">Please type your name to sign in.</p>
+            <input type="text" id="visitorNameInput" placeholder="Your full name" maxlength="100" autocomplete="off">
+            <div id="nameError" aria-live="polite"></div>
+            <button id="nameSubmitBtn" type="button">Sign In</button>
+            <button id="nameCancelBtn" type="button" class="secondary">Cancel</button>
+        </div>
+    </div>
+
     <script>
         const input = document.getElementById('barcodeInput');
         const alertBox = document.getElementById('statusAlert');
         const setupOverlay = document.getElementById('setupOverlay');
         const setupPassInput = document.getElementById('setupPass');
+        const nameOverlay = document.getElementById('nameOverlay');
+        const nameInput = document.getElementById('visitorNameInput');
+        const nameError = document.getElementById('nameError');
+        const nameSubmitBtn = document.getElementById('nameSubmitBtn');
+        const nameCancelBtn = document.getElementById('nameCancelBtn');
 
+        const NAME_PROMPT_TIMEOUT_MS = 45000;   // give up and return to scanning if nobody types
         let kioskPassword = "";
+        let pendingBarcode = null;
+        let nameTimer = null;
 
         // Cookie Helpers
         function setCookie(name, value, days = 30) {
@@ -321,10 +365,108 @@
 
         // Retain continuous focus on scanner input while operating
         document.addEventListener('click', (e) => {
-            if (setupOverlay.classList.contains('hidden') && e.target !== document.querySelector('.reset-pass-btn')) {
+            // While the visitor name prompt is open, keep the cursor in the name box.
+            if (!nameOverlay.classList.contains('hidden')) {
+                if (!e.target.closest('button')) nameInput.focus();
+                return;
+            }
+            if (setupOverlay.classList.contains('hidden') &&
+                nameOverlay.classList.contains('hidden') &&
+                e.target !== document.querySelector('.reset-pass-btn')) {
                 input.focus();
             }
         });
+
+        function showResult(ok, text) {
+            alertBox.className = ok ? "status-success" : "status-error";
+            alertBox.innerText = `${ok ? '✅' : '❌'} ${text}`;
+        }
+
+        // Visitor name prompt
+        function openNamePrompt(barcode) {
+            pendingBarcode = barcode;
+            nameInput.value = '';
+            nameError.textContent = '';
+            nameOverlay.classList.remove('hidden');
+            nameInput.focus();
+            resetNameTimer();
+        }
+
+        function closeNamePrompt() {
+            clearTimeout(nameTimer);
+            pendingBarcode = null;
+            nameOverlay.classList.add('hidden');
+            nameInput.value = '';
+            nameError.textContent = '';
+            input.focus();
+        }
+
+        function resetNameTimer() {
+            clearTimeout(nameTimer);
+            nameTimer = setTimeout(() => {
+                if (pendingBarcode) {
+                    closeNamePrompt();
+                    showResult(false, "Sign-in cancelled (no name entered).");
+                }
+            }, NAME_PROMPT_TIMEOUT_MS);
+        }
+
+        function submitName() {
+            const name = nameInput.value.trim();
+            if (!pendingBarcode) return;
+            if (name.length < 2) {
+                nameError.textContent = "Please enter your full name.";
+                nameInput.focus();
+                return;
+            }
+            submitScan(pendingBarcode, name);
+        }
+
+        nameInput.addEventListener('input', resetNameTimer);
+        nameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); submitName(); }
+            if (e.key === 'Escape') { closeNamePrompt(); showResult(false, "Sign-in cancelled."); }
+        });
+        nameSubmitBtn.addEventListener('click', submitName);
+        nameCancelBtn.addEventListener('click', () => {
+            closeNamePrompt();
+            showResult(false, "Sign-in cancelled.");
+        });
+
+        // Sends a scan to the server. Visitors need a second call that includes their name.
+        function submitScan(barcode, visitorName) {
+            const payload = { barcode: barcode, kiosk_password: kioskPassword };
+            if (visitorName) payload.visitor_name = visitorName;
+
+            return fetch('/kiosk/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'need_name') {
+                    alertBox.className = "";
+                    alertBox.innerText = "";
+                    openNamePrompt(barcode);
+                } else if (data.status === 'success') {
+                    if (pendingBarcode) closeNamePrompt();
+                    showResult(true, data.message);
+                } else if (pendingBarcode) {
+                    // A problem with the name itself: keep the prompt open so it can be fixed.
+                    nameError.textContent = data.message;
+                    nameInput.focus();
+                    nameInput.select();
+                    resetNameTimer();
+                } else {
+                    showResult(false, data.message);
+                }
+            })
+            .catch(() => {
+                if (pendingBarcode) closeNamePrompt();
+                showResult(false, "Network Communication Error");
+            });
+        }
 
         // Scan Submission Handler (Processes Sanitized JSON API Response)
         input.addEventListener('keypress', function (e) {
@@ -333,26 +475,7 @@
                 input.value = '';
 
                 if (!barcode) return;
-
-                fetch('/kiosk/scan', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ barcode: barcode, kiosk_password: kioskPassword })
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        alertBox.className = "status-success";
-                        alertBox.innerText = `✅ ${data.message}`;
-                    } else {
-                        alertBox.className = "status-error";
-                        alertBox.innerText = `❌ ${data.message}`;
-                    }
-                })
-                .catch(() => {
-                    alertBox.className = "status-error";
-                    alertBox.innerText = "❌ Network Communication Error";
-                });
+                submitScan(barcode);
             }
         });
 

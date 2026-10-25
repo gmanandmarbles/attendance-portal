@@ -8,6 +8,8 @@ Brings an existing robotics_attendance.db up to date with the current models:
   - makes attendance_log.session_id nullable (needed for manual hour
     adjustments that aren't tied to a real build session, and for logs that
     are kept after their build session is deleted)
+  - adds attendance_log.visitor_name (VARCHAR(100), nullable) - the name a
+    visitor types in at the kiosk when they scan a visitor badge
   - creates the session_reminder table (tracks which build sessions have
     already had their mentor absence-reminder email handled, so it is never
     sent twice)
@@ -82,9 +84,10 @@ def migrate(db_path: Path, skip_confirm: bool = False):
     session_id_notnull = cols["session_id"][3] == 1  # PRAGMA table_info 'notnull' flag
     has_note = "note" in cols
     has_is_manual = "is_manual" in cols
+    has_visitor_name = "visitor_name" in cols
     has_reminder_table = table_exists(conn, "session_reminder")
 
-    if not session_id_notnull and has_note and has_is_manual and has_reminder_table:
+    if not session_id_notnull and has_note and has_is_manual and has_visitor_name and has_reminder_table:
         print(f"{db_path} is already up to date. No changes made.")
         conn.close()
         return
@@ -95,6 +98,8 @@ def migrate(db_path: Path, skip_confirm: bool = False):
         print("  + add attendance_log.note")
     if not has_is_manual:
         print("  + add attendance_log.is_manual")
+    if not has_visitor_name:
+        print("  + add attendance_log.visitor_name")
     if session_id_notnull:
         print("  + make attendance_log.session_id nullable")
     if not has_reminder_table:
@@ -118,6 +123,9 @@ def migrate(db_path: Path, skip_confirm: bool = False):
                 conn.execute(
                     "ALTER TABLE attendance_log ADD COLUMN is_manual BOOLEAN NOT NULL DEFAULT 0"
                 )
+
+            if not has_visitor_name:
+                conn.execute("ALTER TABLE attendance_log ADD COLUMN visitor_name VARCHAR(100)")
 
             if not has_reminder_table:
                 conn.execute("""
@@ -143,14 +151,15 @@ def migrate(db_path: Path, skip_confirm: bool = False):
                         check_out DATETIME,
                         note VARCHAR(255),
                         is_manual BOOLEAN NOT NULL DEFAULT 0,
+                        visitor_name VARCHAR(100),
                         FOREIGN KEY(user_id) REFERENCES user (id),
                         FOREIGN KEY(session_id) REFERENCES build_session (id)
                     )
                 """)
                 conn.execute("""
                     INSERT INTO attendance_log_new
-                        (id, user_id, session_id, check_in, check_out, note, is_manual)
-                    SELECT id, user_id, session_id, check_in, check_out, note, is_manual
+                        (id, user_id, session_id, check_in, check_out, note, is_manual, visitor_name)
+                    SELECT id, user_id, session_id, check_in, check_out, note, is_manual, visitor_name
                     FROM attendance_log
                 """)
                 conn.execute("DROP TABLE attendance_log")

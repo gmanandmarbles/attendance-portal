@@ -40,7 +40,7 @@
             <input type="hidden" name="action" value="provision">
             <div class="col-md-3">
                 <label class="form-label fw-bold">Google Email</label>
-                <input type="email" name="email" class="form-control" placeholder="user@gmail.com" required>
+                <input type="email" name="email" id="provisionEmail" class="form-control" placeholder="user@gmail.com" required>
             </div>
             <div class="col-md-3">
                 <label class="form-label fw-bold">Full Name</label>
@@ -52,16 +52,38 @@
             </div>
             <div class="col-md-2">
                 <label class="form-label fw-bold">Role</label>
-                <select name="role" class="form-select">
+                <select name="role" id="provisionRole" class="form-select">
                     <option value="student">Student</option>
                     <option value="mentor">Mentor</option>
                     <option value="admin">Admin</option>
+                    <option value="visitor">Visitor (no web access)</option>
                 </select>
             </div>
             <div class="col-md-1 d-flex align-items-end">
                 <button type="submit" class="btn btn-primary w-100">Add</button>
             </div>
+            <div class="col-12" id="visitorHelp" style="display: none;">
+                <div class="alert alert-info small mb-0">
+                    <strong>Visitor badge:</strong> no email is needed and it can't sign in to the website. Anything you leave
+                    blank is filled in for you (e.g. <em>Visitor Badge 1</em>, barcode <code>VISITOR-001</code>). At the kiosk,
+                    scanning the badge asks the visitor for their name. Make one badge per visitor who might be in at the same time.
+                </div>
+            </div>
         </form>
+        <script>
+            (function () {
+                const role = document.getElementById('provisionRole');
+                const email = document.getElementById('provisionEmail');
+                const help = document.getElementById('visitorHelp');
+                function sync() {
+                    const visitor = role.value === 'visitor';
+                    email.required = !visitor;
+                    help.style.display = visitor ? '' : 'none';
+                }
+                role.addEventListener('change', sync);
+                sync();
+            })();
+        </script>
     </div>
 </div>
 
@@ -109,6 +131,7 @@
                             <option value="student" {% if u.role == 'student' %}selected{% endif %}>Student</option>
                             <option value="mentor" {% if u.role == 'mentor' %}selected{% endif %}>Mentor</option>
                             <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>Admin</option>
+                            <option value="visitor" {% if u.role == 'visitor' %}selected{% endif %}>Visitor</option>
                         </select>
                     </form>
                 </td>

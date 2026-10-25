@@ -6,6 +6,7 @@ import smtplib
 import ssl
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
@@ -84,6 +85,10 @@ def to_local_naive(dt):
 # DATABASE MODELS
 # ==========================================
 
+# Every role the portal knows about. "visitor" accounts are kiosk-only badges: they have
+# no web login, and the kiosk asks for the visitor's name each time the badge is scanned in.
+VALID_ROLES = ('student', 'mentor', 'admin', 'visitor')
+
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -98,6 +103,10 @@ class User(db.Model):
     @property
     def is_mentor_or_admin(self):
         return self.role in ['mentor', 'admin']
+
+    @property
+    def is_visitor(self):
+        return self.role == 'visitor'
 
 class BuildSession(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -130,6 +139,13 @@ class AttendanceLog(db.Model):
     # True when this row was created via the manual "adjust hours" tool rather than an
     # actual check-in/check-out event.
     is_manual = db.Column(db.Boolean, default=False, nullable=False)
+    # For visitor badges: the name the visitor typed in at the kiosk for this visit.
+    visitor_name = db.Column(db.String(100), nullable=True)
+
+    @property
+    def display_name(self):
+        """Who this visit belongs to: the typed-in visitor name if there is one."""
+        return self.visitor_name or self.user.name or self.user.email
 
     @property
     def duration_hours(self):
@@ -170,6 +186,13 @@ def login_required(f):
         if 'user_id' not in session:
             flash("Please log in to access this page.", "warning")
             return redirect(url_for('login'))
+        # Visitor badges never get web access, even if a session already existed
+        # (e.g. an account that was switched to visitor while signed in).
+        current_user = User.query.get(session['user_id'])
+        if current_user and current_user.is_visitor:
+            session.clear()
+            flash("Visitor accounts don't have web access.", "danger")
+            return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -454,6 +477,10 @@ def auth_callback():
     if admin_email and email == admin_email and user.role != 'admin':
         user.role = 'admin'
         db.session.commit()
+
+    if user.is_visitor:
+        flash("Visitor accounts don't have web access. Please use the shop kiosk to sign in.", "danger")
+        return redirect(url_for('index'))
 
     session['user_id'] = user.id
     session['user_role'] = user.role
@@ -829,7 +856,7 @@ def mentor_monitor():
     ).order_by(BuildSession.start_time.desc()).first()
     signed_in_logs = AttendanceLog.query.join(User).filter(
         AttendanceLog.check_out.is_(None),
-        User.role.in_(['student', 'mentor', 'admin'])
+        User.role.in_(['student', 'mentor', 'admin', 'visitor'])
     ).order_by(AttendanceLog.check_in.asc()).all()
 
     return render_template(
@@ -971,6 +998,21 @@ def mentor_adjust_hours():
 # ADMIN ROUTES
 # ==========================================
 
+def _next_visitor_number():
+    """Lowest-unused number for naming a new visitor badge: Visitor Badge N / VISITOR-00N."""
+    number = User.query.filter_by(role='visitor').count() + 1
+    while (User.query.filter_by(barcode=f"VISITOR-{number:03d}").first()
+           or User.query.filter_by(name=f"Visitor Badge {number}").first()):
+        number += 1
+    return number
+
+
+def _placeholder_visitor_email():
+    """The users table needs a unique email, but visitors don't have one. `.invalid` is a
+    reserved TLD, so this can never be a real mailbox or a Google sign-in match."""
+    return f"visitor-{uuid.uuid4().hex[:12]}@visitor.invalid"
+
+
 @app.route('/admin/users', methods=['GET', 'POST'])
 @role_required('admin')
 def admin_users():
@@ -978,27 +1020,52 @@ def admin_users():
         action = request.form.get('action')
         
         if action == 'provision':
-            email = request.form.get('email', '').lower()
-            barcode = request.form.get('barcode')
-            name = request.form.get('name')
+            email = request.form.get('email', '').strip().lower()
+            barcode = request.form.get('barcode', '').strip() or None
+            name = request.form.get('name', '').strip()
             role = request.form.get('role', 'student')
-            
+
+            if role not in VALID_ROLES:
+                flash("Unknown role.", "danger")
+                return redirect(url_for('admin_users'))
+
+            if role == 'visitor':
+                # Visitor badges don't need a Google email, a name or a barcode typed in:
+                # anything left blank is filled in ("Visitor Badge 3" / VISITOR-003).
+                number = _next_visitor_number()
+                name = name or f"Visitor Badge {number}"
+                barcode = barcode or f"VISITOR-{number:03d}"
+                email = email or _placeholder_visitor_email()
+            elif not email:
+                flash("Email is required for students, mentors and admins.", "danger")
+                return redirect(url_for('admin_users'))
+
             if User.query.filter_by(email=email).first():
                 flash("User with this email already exists.", "danger")
+            elif barcode and User.query.filter_by(barcode=barcode).first():
+                flash("Another user already has that barcode.", "danger")
             else:
-                user = User(email=email, barcode=barcode, name=name, role=role)
+                user = User(email=email, barcode=barcode, name=name or None, role=role)
                 db.session.add(user)
                 db.session.commit()
-                flash(f"Provisioned user {email}.", "success")
+                if role == 'visitor':
+                    flash(f"Created visitor badge \"{user.name}\" (barcode {user.barcode}). It has no web access; "
+                          "visitors are asked for their name when they scan in at the kiosk.", "success")
+                else:
+                    flash(f"Provisioned user {email}.", "success")
                 
         elif action == 'update_role':
             user_id = request.form.get('user_id')
             new_role = request.form.get('role')
             user = User.query.get(user_id)
-            if user:
+            if new_role not in VALID_ROLES:
+                flash("Unknown role.", "danger")
+            elif user and user.id == session.get('user_id') and new_role == 'visitor':
+                flash("You can't change your own account to a visitor; that would lock you out.", "danger")
+            elif user:
                 user.role = new_role
                 db.session.commit()
-                flash(f"Updated role for {user.email} to {new_role}.", "success")
+                flash(f"Updated role for {user.name or user.email} to {new_role}.", "success")
                 
         elif action == 'edit_user':
             user_id = request.form.get('user_id')
@@ -1057,14 +1124,15 @@ def admin_logs():
             db.or_(
                 User.name.ilike(like),
                 User.email.ilike(like),
-                User.barcode.ilike(like)
+                User.barcode.ilike(like),
+                AttendanceLog.visitor_name.ilike(like)
             )
         )
 
     if session_id:
         query = query.filter(AttendanceLog.session_id == session_id)
 
-    if role_filter in ('student', 'mentor', 'admin'):
+    if role_filter in VALID_ROLES:
         query = query.filter(User.role == role_filter)
 
     query = query.order_by(AttendanceLog.check_in.desc())
@@ -1588,7 +1656,7 @@ BOOKLET_CELL_PADDING = 5.0
 BOOKLET_NAME_WIDTH = 96.0
 BOOKLET_BARCODE_HEIGHT = 22.0
 BOOKLET_MAX_MODULE_WIDTH = 1.0         # pt; keeps short codes from stretching huge
-BOOKLET_ROLE_FILTERS = ('student', 'mentor', 'admin')
+BOOKLET_ROLE_FILTERS = VALID_ROLES
 
 
 def _booklet_display_name(user):
@@ -1791,6 +1859,8 @@ def kiosk_scan():
         return jsonify({"status": "error", "message": "Invalid Kiosk Password"}), 401
 
     barcode = request.json.get('barcode')
+    # Only sent by the kiosk on the second step of a visitor sign-in (after the name prompt).
+    visitor_name = " ".join(str(request.json.get('visitor_name') or "").split())[:100]
     user = User.query.filter_by(barcode=barcode).first()
     if not user:
         return jsonify({"status": "error", "message": "Barcode Unrecognized"}), 404
@@ -1820,13 +1890,29 @@ def kiosk_scan():
 
                 for unclosed_log in unclaimed_student_logs:
                     db.session.delete(unclosed_log)
-                
+
+                # Visitors still signed in when the last mentor leaves are signed out
+                # (not deleted), so the record of who visited is kept.
+                stray_visitor_logs = AttendanceLog.query.join(User).filter(
+                    AttendanceLog.session_id == open_log.session_id,
+                    AttendanceLog.check_out == None,
+                    User.role == 'visitor'
+                ).all()
+                for visitor_log in stray_visitor_logs:
+                    visitor_log.check_out = now
+
                 db.session.commit()
+
+        if user.is_visitor:
+            who = open_log.visitor_name or user.name or "Visitor"
+            sign_out_message = f"Goodbye, {who}! You're signed out."
+        else:
+            sign_out_message = f"User ({barcode}) signed out!"
 
         return jsonify({
             "status": "success", 
             "action": "CHECK_OUT",
-            "message": f"User ({barcode}) signed out!"
+            "message": sign_out_message
         })
     else:
         # A session is a candidate for check-in if it's currently running, OR it starts
@@ -1856,13 +1942,36 @@ def kiosk_scan():
                     "message": f"{candidate_session.title} starts in {minutes_until} min. Waiting for a mentor to sign in first."
                 }), 400
 
-        new_log = AttendanceLog(user_id=user.id, session_id=candidate_session.id, check_in=now)
+        if user.is_visitor:
+            if not visitor_name:
+                # Nothing is recorded yet; the kiosk shows a name prompt and scans again with the name.
+                return jsonify({
+                    "status": "need_name",
+                    "message": "Welcome, visitor! Please type your name to sign in."
+                })
+            if len(visitor_name) < 2:
+                return jsonify({"status": "error", "message": "Please enter your full name."}), 400
+            # If the next person's scanner fires while the name box is open, the "name" is
+            # really another badge's code. Refuse it rather than saving a barcode as a name.
+            if User.query.filter_by(barcode=visitor_name).first():
+                return jsonify({"status": "error", "message": "That looks like a badge code. Please type your name."}), 400
+
+        new_log = AttendanceLog(
+            user_id=user.id,
+            session_id=candidate_session.id,
+            check_in=now,
+            visitor_name=visitor_name if user.is_visitor else None
+        )
         db.session.add(new_log)
         db.session.commit()
 
         message = f"User ({barcode}) signed in!"
         if in_buffer:
             message = f"User ({barcode}) signed in early — {candidate_session.title} starts soon!"
+        if user.is_visitor:
+            message = f"Welcome, {visitor_name}! You're signed in."
+            if in_buffer:
+                message = f"Welcome, {visitor_name}! You're signed in early — {candidate_session.title} starts soon."
 
         return jsonify({
             "status": "success", 

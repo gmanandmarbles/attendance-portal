@@ -16,7 +16,7 @@
         <form method="GET" class="row g-3 align-items-end">
             <div class="col-md-4">
                 <label class="form-label fw-bold">Search</label>
-                <input type="text" name="q" class="form-control" placeholder="Name, email, or barcode" value="{{ q }}">
+                <input type="text" name="q" class="form-control" placeholder="Name, visitor name, email, or barcode" value="{{ q }}">
             </div>
             <div class="col-md-3">
                 <label class="form-label fw-bold">Build Session</label>
@@ -34,6 +34,7 @@
                     <option value="student" {% if role_filter == 'student' %}selected{% endif %}>Student</option>
                     <option value="mentor" {% if role_filter == 'mentor' %}selected{% endif %}>Mentor</option>
                     <option value="admin" {% if role_filter == 'admin' %}selected{% endif %}>Admin</option>
+                    <option value="visitor" {% if role_filter == 'visitor' %}selected{% endif %}>Visitor</option>
                 </select>
             </div>
             <div class="col-md-2 d-flex gap-2">
@@ -61,9 +62,12 @@
         <tbody>
             {% for log in logs %}
             <tr>
-                <td>{{ log.user.name or log.user.email }}</td>
                 <td>
-                    <span class="badge {% if log.user.role == 'admin' %}bg-danger{% elif log.user.role == 'mentor' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
+                    {{ log.display_name }}
+                    {% if log.visitor_name %}<div class="small text-muted">{{ log.user.name or log.user.email }}</div>{% endif %}
+                </td>
+                <td>
+                    <span class="badge {% if log.user.role == 'admin' %}bg-danger{% elif log.user.role == 'mentor' %}bg-warning text-dark{% elif log.user.role == 'visitor' %}bg-info text-dark{% else %}bg-secondary{% endif %}">
                         {{ log.user.role }}
                     </span>
                 </td>

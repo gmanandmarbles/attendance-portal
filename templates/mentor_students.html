@@ -22,7 +22,7 @@
                         <h6 class="mb-0">{{ u.name or u.email }}</h6>
                         <small class="badge bg-dark text-capitalize ms-1">{{ u.role }}</small>
                     </div>
-                    <small class="{% if selected_user and selected_user.id == u.id %}text-white-50{% else %}text-muted{% endif %}">{{ u.email }}</small>
+                    <small class="{% if selected_user and selected_user.id == u.id %}text-white-50{% else %}text-muted{% endif %}">{{ 'Visitor badge' if u.role == 'visitor' else u.email }}</small>
                 </div>
             </a>
             {% endfor %}
@@ -39,7 +39,11 @@
                 {% endif %}
                 <div>
                     <h3 class="mb-1">{{ selected_user.name or selected_user.email }}</h3>
+                    {% if selected_user.role == 'visitor' %}
+                    <p class="mb-1 text-muted">Visitor badge (no web access) | Barcode: <code>{{ selected_user.barcode or 'None' }}</code></p>
+                    {% else %}
                     <p class="mb-1 text-muted">Email: {{ selected_user.email }} | Barcode: <code>{{ selected_user.barcode or 'None' }}</code></p>
+                    {% endif %}
                     <h5 class="mb-0 text-success">Total Lifetime Hours: <strong>{{ total_hours }} hrs</strong></h5>
                 </div>
             </div>
@@ -54,7 +58,7 @@
         <div class="table-responsive bg-white rounded shadow-sm mb-4">
             <table class="table table-sm table-striped align-middle mb-0">
                 <thead class="table-light">
-                    <tr><th>Session</th><th>Check In</th><th>Check Out</th><th>Duration</th><th class="text-end">Actions</th></tr>
+                    <tr><th>Session</th>{% if selected_user.role == 'visitor' %}<th>Visitor</th>{% endif %}<th>Check In</th><th>Check Out</th><th>Duration</th><th class="text-end">Actions</th></tr>
                 </thead>
                 <tbody>
                     {% for log in logs %}
@@ -67,6 +71,7 @@
                             {{ log.session.title if log.session else (log.note or 'Unknown Session') }}
                             {% endif %}
                         </td>
+                        {% if selected_user.role == 'visitor' %}<td>{{ log.visitor_name or '—' }}</td>{% endif %}
                         <td>{{ log.check_in.strftime('%Y-%m-%d %H:%M') if not log.is_manual else '—' }}</td>
                         <td>
                             {% if log.is_manual %}
@@ -101,7 +106,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="5" class="text-muted text-center py-3">No attendance logs recorded.</td></tr>
+                    <tr><td colspan="6" class="text-muted text-center py-3">No attendance logs recorded.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

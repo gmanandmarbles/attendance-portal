@@ -154,6 +154,7 @@
             border-radius: 999px;
             padding: 0.2rem 0.55rem;
         }
+        .role-badge.visitor { color: #92400e; background: #fef3c7; }
         .student-meta { margin-top: 0.45rem; color: var(--muted); font: 0.85rem/1.35 Arial, sans-serif; }
 
         .empty-state {
@@ -204,13 +205,14 @@
                     {% if log.user.photo_url %}
                     <img src="{{ url_for('get_photo', filename=log.user.photo_url.split('/')[-1]) }}" alt="">
                     {% else %}
-                    {{ (log.user.name or log.user.email)[0]|upper }}
+                    {{ log.display_name[0]|upper }}
                     {% endif %}
                 </div>
                 <div>
                     <h2 class="student-name">
-                        {{ log.user.name or log.user.email }}
+                        {{ log.display_name }}
                         {% if log.user.role in ['mentor', 'admin'] %}<span class="role-badge">{{ log.user.role }}</span>{% endif %}
+                        {% if log.user.role == 'visitor' %}<span class="role-badge visitor">visitor</span>{% endif %}
                     </h2>
                     <div class="student-meta">In since {{ log.check_in.strftime('%I:%M %p') }}<br>{{ log.session.title if log.session else 'No active session' }}</div>
                 </div>
