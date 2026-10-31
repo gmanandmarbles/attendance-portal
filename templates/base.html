@@ -61,6 +61,14 @@
             border: 2px solid var(--primary-indigo);
         }
 
+        /* Team colours: names are coloured with their team's colour. */
+        .team-name { font-weight: 600; }
+        .team-name.on-active {
+            background-color: #ffffff;
+            padding: 0 0.4rem;
+            border-radius: 0.25rem;
+        }
+
         footer {
             margin-top: auto;
             background-color: #ffffff;
@@ -108,6 +116,12 @@
                         {% if session.get('user_role') == 'admin' %}
                             <li class="nav-item">
                                 <a class="nav-link text-warning fw-semibold" href="{{ url_for('admin_users') }}">User Management</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link text-warning fw-semibold" href="{{ url_for('admin_user_new') }}">Add User</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link text-warning fw-semibold" href="{{ url_for('admin_teams') }}">Teams</a>
                             </li>
                             <li class="nav-item">
                                 <a class="nav-link text-warning fw-semibold" href="{{ url_for('admin_logs') }}">Event Log</a>

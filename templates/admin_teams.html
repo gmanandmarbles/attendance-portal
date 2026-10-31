@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block title %}Teams{% endblock %}
+
+{% block content %}
+{% from "_team.html" import team_name %}
+<div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
+    <h3 class="mb-0">Admin Portal: Teams</h3>
+    {% if teams %}
+    <a href="{{ url_for('admin_team_report') }}" class="btn btn-warning btn-sm fw-semibold">&#128196; Hours report: all teams (PDF)</a>
+    {% endif %}
+</div>
+<p class="text-muted small mb-4">Each person can be on one team. Names are shown in their team's colour on the dashboards, and the team's logo is printed on their ID cards.
+    {% if teams %}<strong>{{ unassigned_count }}</strong> {{ 'person is' if unassigned_count == 1 else 'people are' }} not on a team.{% endif %}</p>
+
+<!-- Create team -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-dark text-white">
+        <h5 class="card-title mb-0">Create a Team</h5>
+    </div>
+    <div class="card-body">
+        <form method="POST" enctype="multipart/form-data" class="row g-3">
+            <input type="hidden" name="action" value="create">
+            <div class="col-md-4">
+                <label class="form-label fw-bold" for="newTeamName">Team name</label>
+                <input type="text" name="name" id="newTeamName" class="form-control" maxlength="60" placeholder="e.g. Programming" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-bold" for="newTeamColor">Colour</label>
+                <input type="color" name="color" id="newTeamColor" class="form-control form-control-color w-100" value="{{ default_color }}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-bold" for="newTeamLogo">Logo <span class="text-muted fw-normal">(transparent PNG, optional)</span></label>
+                <input type="file" name="logo" id="newTeamLogo" class="form-control" accept="image/png">
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100">Add Team</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if not teams %}
+<div class="alert alert-info">No teams yet. Create one above, then assign people to it.</div>
+{% endif %}
+
+{% for t in teams %}
+{% set members = team_members[t.id] %}
+<div class="card shadow-sm mb-4" style="border-top: 6px solid {{ t.color }};">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+            <div class="d-flex align-items-center">
+                {% if t.logo_filename %}
+                <img src="{{ url_for('team_logo', team_id=t.id) }}?v={{ t.logo_filename }}" alt="{{ t.name }} logo"
+                     class="me-3 border rounded p-1 bg-light" style="height: 56px; max-width: 120px; object-fit: contain;">
+                {% else %}
+                <div class="me-3 border rounded bg-light text-muted small d-flex align-items-center justify-content-center"
+                     style="height: 56px; width: 56px;">No logo</div>
+                {% endif %}
+                <div>
+                    <h4 class="mb-0" style="color: {{ t.color }};">{{ t.name }}</h4>
+                    <small class="text-muted">{{ members|length }} member{{ '' if members|length == 1 else 's' }}</small>
+                </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="{{ url_for('admin_team_report', team_id=t.id) }}" class="btn btn-sm btn-outline-dark">&#128196; Hours report (PDF)</a>
+                <a href="{{ url_for('admin_team_id_cards', team_id=t.id) }}"
+                   class="btn btn-sm btn-warning fw-semibold {% if not members %}disabled{% endif %}">&#128424; ID cards (PDF)</a>
+                <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#edit-team-{{ t.id }}">Edit</button>
+                <form method="POST" class="d-inline"
+                      onsubmit="return confirm('Delete {{ t.name|e }}? Its {{ members|length }} member(s) will be left on no team.');">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="team_id" value="{{ t.id }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Edit -->
+        <div class="collapse mb-3" id="edit-team-{{ t.id }}">
+            <form method="POST" enctype="multipart/form-data" class="row g-3 bg-light rounded p-3 border">
+                <input type="hidden" name="action" value="edit">
+                <input type="hidden" name="team_id" value="{{ t.id }}">
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">Team name</label>
+                    <input type="text" name="name" class="form-control" maxlength="60" value="{{ t.name }}" required>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label fw-bold">Colour</label>
+                    <input type="color" name="color" class="form-control form-control-color w-100" value="{{ t.color }}">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">{{ 'Replace logo' if t.logo_filename else 'Logo' }} <span class="text-muted fw-normal">(PNG)</span></label>
+                    <input type="file" name="logo" class="form-control" accept="image/png">
+                    {% if t.logo_filename %}
+                    <div class="form-check mt-1">
+                        <input class="form-check-input" type="checkbox" name="remove_logo" value="1" id="rm-logo-{{ t.id }}">
+                        <label class="form-check-label small" for="rm-logo-{{ t.id }}">Remove current logo</label>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">Save</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Members -->
+        {% if members %}
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-3">
+                <thead class="table-light"><tr><th>Name</th><th>Role</th><th>Barcode</th><th style="width: 90px;"></th></tr></thead>
+                <tbody>
+                    {% for u in members %}
+                    <tr>
+                        <td>{{ team_name(u) }}</td>
+                        <td class="text-capitalize">{{ u.role }}</td>
+                        <td><code>{{ u.barcode or '-' }}</code></td>
+                        <td class="text-end">
+                            <form method="POST" class="d-inline">
+                                <input type="hidden" name="action" value="assign">
+                                <input type="hidden" name="user_id" value="{{ u.id }}">
+                                <input type="hidden" name="team_id" value="">
+                                <button type="submit" class="btn btn-sm btn-outline-secondary">Remove</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted mb-3">Nobody on this team yet.</p>
+        {% endif %}
+
+        <!-- Add a member -->
+        <form method="POST" class="row g-2 align-items-end">
+            <input type="hidden" name="action" value="assign">
+            <input type="hidden" name="team_id" value="{{ t.id }}">
+            <div class="col-sm-8 col-md-5">
+                <label class="form-label fw-bold small mb-1">Add a person</label>
+                <select name="user_id" class="form-select form-select-sm" required>
+                    <option value="" disabled selected>Choose someone...</option>
+                    {% for u in assignable if u.team_id != t.id %}
+                    <option value="{{ u.id }}">{{ u.name or u.email }}{% if u.team %} (currently {{ u.team.name }}){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary">Add to {{ t.name }}</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endfor %}
+{% endblock %}

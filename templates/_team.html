@@ -1,0 +1,19 @@
+{# Shared bits for showing which team someone is on.
+   team_name  - the person's name, in their team's colour (plain text if they have no team)
+   team_badge - a small "Team name" pill, or a grey "No team" pill. Visitors get nothing. #}
+
+{% macro team_name(u, active=False) -%}
+{%- set label = u.name or u.email -%}
+{%- if u.team -%}
+<span class="team-name{{ ' on-active' if active }}" style="color: {{ u.team.color }};">{{ label }}</span>
+{%- else -%}{{ label }}{%- endif -%}
+{%- endmacro %}
+
+{% macro team_badge(u) -%}
+{%- if u.role == 'visitor' -%}
+{%- elif u.team -%}
+<span class="badge team-badge" style="background-color: {{ u.team.color }}; color: #ffffff;">{{ u.team.name }}</span>
+{%- else -%}
+<span class="badge text-bg-light border text-muted">No team</span>
+{%- endif -%}
+{%- endmacro %}

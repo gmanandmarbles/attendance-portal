@@ -33,6 +33,34 @@
     </div>
 </div>
 
+<!-- ========== TEAM ID CARDS ========== -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-dark text-white">
+        <h5 class="card-title mb-0">&#128101; Team ID Cards</h5>
+    </div>
+    <div class="card-body">
+        {% if teams %}
+        <p class="mb-3">Prints the ID cards for everyone on one team, sorted by last name. Each card carries the team's logo
+            next to the photo (teams with no logo print without one).</p>
+        <form method="GET" action="{{ url_for('admin_team_id_cards') }}" class="row g-2 align-items-end">
+            <div class="col-sm-6 col-md-4">
+                <label class="form-label fw-bold" for="teamPick">Team</label>
+                <select name="team_id" id="teamPick" class="form-select" required>
+                    {% for t in teams %}
+                    <option value="{{ t.id }}">{{ t.name }} ({{ t.members|length }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-warning fw-semibold">&#128424; Download Team ID Cards PDF</button>
+            </div>
+        </form>
+        {% else %}
+        <p class="mb-0 text-muted">No teams yet. <a href="{{ url_for('admin_teams') }}">Create a team</a> to print its cards here.</p>
+        {% endif %}
+    </div>
+</div>
+
 <!-- ========== ID CARD BATCH BUILDER ========== -->
 <div class="card shadow-sm mb-4">
     <div class="card-header bg-dark text-white">

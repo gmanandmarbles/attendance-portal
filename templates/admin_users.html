@@ -11,6 +11,12 @@
     <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
         <h5 class="card-title mb-0">Printable ID Cards</h5>
         <div>
+            <a href="{{ url_for('admin_user_new') }}" class="btn btn-outline-light btn-sm fw-semibold me-1">
+                Quick Add User
+            </a>
+            <a href="{{ url_for('admin_teams') }}" class="btn btn-outline-light btn-sm fw-semibold me-1">
+                Teams
+            </a>
             <a href="{{ url_for('admin_print_center') }}" class="btn btn-outline-light btn-sm fw-semibold me-1">
                 Print Center (booklet &amp; scan-to-select)
             </a>
@@ -98,6 +104,7 @@
                 <th style="min-width: 140px;">Barcode ID</th>
                 <th></th>
                 <th style="width: 150px;">Role</th>
+                <th style="width: 170px;">Team</th>
                 <th style="width: 280px;">Upload Photo</th>
             </tr>
         </thead>
@@ -134,6 +141,25 @@
                             <option value="visitor" {% if u.role == 'visitor' %}selected{% endif %}>Visitor</option>
                         </select>
                     </form>
+                </td>
+                <td style="width: 170px;">
+                    {% if u.role == 'visitor' %}
+                    <span class="text-muted small">Visitors have no team</span>
+                    {% else %}
+                    <form method="POST" action="{{ url_for('admin_teams') }}">
+                        <input type="hidden" name="action" value="assign">
+                        <input type="hidden" name="next" value="users">
+                        <input type="hidden" name="user_id" value="{{ u.id }}">
+                        <select name="team_id" class="form-select form-select-sm"
+                                {% if u.team %}style="border-left: 6px solid {{ u.team.color }};"{% endif %}
+                                onchange="this.form.submit()">
+                            <option value="">No team</option>
+                            {% for t in teams %}
+                            <option value="{{ t.id }}" {% if u.team_id == t.id %}selected{% endif %}>{{ t.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </form>
+                    {% endif %}
                 </td>
                 <td style="width: 280px;">
                     <form method="POST" enctype="multipart/form-data" class="d-flex">

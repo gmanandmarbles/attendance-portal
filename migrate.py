@@ -13,6 +13,8 @@ Brings an existing robotics_attendance.db up to date with the current models:
   - creates the session_reminder table (tracks which build sessions have
     already had their mentor absence-reminder email handled, so it is never
     sent twice)
+  - creates the team table (name, colour, optional logo file name)
+  - adds user.team_id (INTEGER, nullable) - the one team a person is on
 
 Safe to run more than once — it inspects the current schema first and
 does nothing if the database is already up to date. Always makes a
@@ -86,8 +88,11 @@ def migrate(db_path: Path, skip_confirm: bool = False):
     has_is_manual = "is_manual" in cols
     has_visitor_name = "visitor_name" in cols
     has_reminder_table = table_exists(conn, "session_reminder")
+    has_team_table = table_exists(conn, "team")
+    has_team_id = "team_id" in get_columns(conn, "user")
 
-    if not session_id_notnull and has_note and has_is_manual and has_visitor_name and has_reminder_table:
+    if (not session_id_notnull and has_note and has_is_manual and has_visitor_name
+            and has_reminder_table and has_team_table and has_team_id):
         print(f"{db_path} is already up to date. No changes made.")
         conn.close()
         return
@@ -104,6 +109,10 @@ def migrate(db_path: Path, skip_confirm: bool = False):
         print("  + make attendance_log.session_id nullable")
     if not has_reminder_table:
         print("  + create session_reminder table")
+    if not has_team_table:
+        print("  + create team table")
+    if not has_team_id:
+        print("  + add user.team_id")
 
     if not skip_confirm:
         answer = input("\nProceed? [y/N] ").strip().lower()
@@ -137,6 +146,20 @@ def migrate(db_path: Path, skip_confirm: bool = False):
                         FOREIGN KEY(session_id) REFERENCES build_session (id)
                     )
                 """)
+
+            if not has_team_table:
+                conn.execute("""
+                    CREATE TABLE team (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        name VARCHAR(60) NOT NULL,
+                        color VARCHAR(7) NOT NULL,
+                        logo_filename VARCHAR(255),
+                        UNIQUE (name)
+                    )
+                """)
+
+            if not has_team_id:
+                conn.execute('ALTER TABLE "user" ADD COLUMN team_id INTEGER REFERENCES team (id)')
 
             if session_id_notnull:
                 # SQLite can't drop a NOT NULL constraint with a plain ALTER TABLE,
@@ -172,6 +195,8 @@ def migrate(db_path: Path, skip_confirm: bool = False):
         print("attendance_log columns now:", ", ".join(new_cols.keys()))
         print(f"attendance_log has {row_count} row(s) — verify this matches what you expected.")
         print("session_reminder table present:", table_exists(conn, "session_reminder"))
+        print("team table present:", table_exists(conn, "team"))
+        print("user columns now:", ", ".join(get_columns(conn, "user").keys()))
 
     except Exception:
         print("\nSomething went wrong — restoring the original database from backup.")

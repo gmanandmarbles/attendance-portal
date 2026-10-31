@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Add User{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
+    <h3 class="mb-0">Admin Portal: Add User</h3>
+    <a href="{{ url_for('admin_users') }}" class="btn btn-outline-dark btn-sm">All users</a>
+</div>
+<p class="text-muted small mb-4">Scan or type the barcode, then fill in the rest. After you save, this page clears so you can add the next person.
+    Visitor badges are still made from <a href="{{ url_for('admin_users') }}">User Management</a>.</p>
+
+<div class="row">
+    <div class="col-lg-7">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-dark text-white">
+                <h5 class="card-title mb-0">New Person</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" id="newUserForm" autocomplete="off">
+                    <!-- Barcode -->
+                    <label class="form-label fw-bold" for="barcode">Barcode</label>
+                    <div class="input-group">
+                        <input type="text" name="barcode" id="barcode" class="form-control form-control-lg"
+                               value="{{ form.barcode }}" maxlength="50" autofocus required
+                               placeholder="Scan with a scanner, type it, or use the camera">
+                        <button type="button" class="btn btn-outline-primary" id="cameraBtn">&#128247; Scan with camera</button>
+                    </div>
+                    <div id="barcodeNote" class="small mt-1" style="min-height: 1.4em;" aria-live="polite"></div>
+
+                    <div id="cameraBox" class="mb-3" style="display: none;">
+                        <div id="reader" class="border rounded overflow-hidden" style="max-width: 420px;"></div>
+                        <div class="d-flex align-items-center gap-2 mt-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="cameraStop">Close camera</button>
+                            <span class="small text-muted" id="cameraStatus">Point the camera at the barcode.</span>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mt-1">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold" for="name">Name</label>
+                            <input type="text" name="name" id="name" class="form-control" value="{{ form.name }}"
+                                   maxlength="100" placeholder="Full name" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold" for="email">Email</label>
+                            <input type="email" name="email" id="email" class="form-control" value="{{ form.email }}"
+                                   maxlength="120" placeholder="user@gmail.com" required>
+                            <div id="emailNote" class="small mt-1" style="min-height: 1.4em;" aria-live="polite"></div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold" for="team_id">Team</label>
+                            <select name="team_id" id="team_id" class="form-select">
+                                <option value="">No team</option>
+                                {% for t in teams %}
+                                <option value="{{ t.id }}" {% if form.team_id|string == t.id|string %}selected{% endif %}>{{ t.name }}</option>
+                                {% endfor %}
+                            </select>
+                            {% if not teams %}<div class="form-text">No teams yet. <a href="{{ url_for('admin_teams') }}">Create one</a>.</div>{% endif %}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold" for="role">Role</label>
+                            <select name="role" id="role" class="form-select">
+                                {% for r in roles %}
+                                <option value="{{ r }}" {% if form.role == r %}selected{% endif %}>{{ r|capitalize }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mt-4">
+                        <button type="submit" class="btn btn-primary px-4 fw-semibold">Add Person</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+(function () {
+    const barcode = document.getElementById('barcode');
+    const nameInput = document.getElementById('name');
+    const email = document.getElementById('email');
+    const barcodeNote = document.getElementById('barcodeNote');
+    const emailNote = document.getElementById('emailNote');
+    const cameraBtn = document.getElementById('cameraBtn');
+    const cameraBox = document.getElementById('cameraBox');
+    const cameraStop = document.getElementById('cameraStop');
+    const cameraStatus = document.getElementById('cameraStatus');
+    const CHECK_URL = {{ url_for('admin_user_check')|tojson }};
+
+    // A hardware scanner types the code and presses Enter; move on instead of submitting.
+    barcode.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); check(); nameInput.focus(); }
+    });
+
+    // Live "already used" warnings. The server still checks again when you save.
+    let timer = null;
+    function scheduleCheck() { clearTimeout(timer); timer = setTimeout(check, 300); }
+    function check() {
+        const b = barcode.value.trim();
+        const e = email.value.trim();
+        if (!b && !e) { barcodeNote.textContent = ''; emailNote.textContent = ''; return; }
+        fetch(CHECK_URL + '?barcode=' + encodeURIComponent(b) + '&email=' + encodeURIComponent(e))
+            .then(r => r.json())
+            .then(d => {
+                show(barcodeNote, b, d.barcode_taken, 'barcode');
+                show(emailNote, e, d.email_taken, 'email');
+            })
+            .catch(() => {});
+    }
+    function show(el, value, owner, what) {
+        if (!value) { el.textContent = ''; return; }
+        if (owner) { el.className = 'small mt-1 text-danger'; el.textContent = 'That ' + what + ' already belongs to ' + owner + '.'; }
+        else { el.className = 'small mt-1 text-success'; el.textContent = 'This ' + what + ' is free.'; }
+    }
+    barcode.addEventListener('input', scheduleCheck);
+    email.addEventListener('input', scheduleCheck);
+    if (barcode.value) check();
+
+    // Camera scanning (needs https and camera permission)
+    let scanner = null;
+    function stopCamera() {
+        cameraBox.style.display = 'none';
+        cameraBtn.disabled = false;
+        if (!scanner) return Promise.resolve();
+        const s = scanner; scanner = null;
+        return s.stop().then(() => s.clear()).catch(() => {});
+    }
+    cameraBtn.addEventListener('click', () => {
+        if (typeof Html5Qrcode === 'undefined') {
+            barcodeNote.className = 'small mt-1 text-danger';
+            barcodeNote.textContent = 'The camera scanner could not load. Type or scan the barcode instead.';
+            return;
+        }
+        cameraBox.style.display = '';
+        cameraBtn.disabled = true;
+        cameraStatus.textContent = 'Starting camera...';
+        const F = Html5QrcodeSupportedFormats;
+        scanner = new Html5Qrcode('reader', {
+            formatsToSupport: [F.CODE_128, F.CODE_39, F.CODE_93, F.EAN_13, F.EAN_8, F.UPC_A, F.ITF, F.QR_CODE],
+            experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+            verbose: false
+        });
+        scanner.start(
+            { facingMode: 'environment' },
+            { fps: 10, qrbox: { width: 300, height: 120 } },
+            (text) => {
+                barcode.value = text.trim();
+                stopCamera().then(() => { check(); nameInput.focus(); });
+            },
+            () => {}
+        ).then(() => {
+            cameraStatus.textContent = 'Point the camera at the barcode.';
+        }).catch((err) => {
+            scanner = null;
+            cameraBox.style.display = 'none';
+            cameraBtn.disabled = false;
+            barcodeNote.className = 'small mt-1 text-danger';
+            barcodeNote.textContent = 'Could not open the camera (' + (err && err.message ? err.message : err) +
+                '). Allow camera access, or type the barcode instead.';
+        });
+    });
+    cameraStop.addEventListener('click', stopCamera);
+})();
+</script>
+{% endblock %}

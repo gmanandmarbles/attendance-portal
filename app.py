@@ -1,4 +1,5 @@
 import os
+import re
 import csv
 import io
 import json
@@ -11,7 +12,8 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
 from zoneinfo import ZoneInfo
-from functools import wraps
+from functools import wraps, lru_cache
+from xml.sax.saxutils import escape as xml_escape
 from flask import (
     Flask, render_template, redirect, url_for, 
     request, session, flash, jsonify, send_from_directory, abort, Response
@@ -28,6 +30,9 @@ from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen.canvas import Canvas
+from reportlab.lib import colors as rl_colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
 from PIL import Image, ImageOps
 
 load_dotenv()
@@ -49,7 +54,11 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = os.path.join(app.root_path, 'uploads', 'photos')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
+# Team logos (transparent PNGs), served through a protected route as well
+app.config['LOGO_FOLDER'] = os.path.join(app.root_path, 'uploads', 'logos')
+
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['LOGO_FOLDER'], exist_ok=True)
 
 db = SQLAlchemy(app)
 oauth = OAuth(app)
@@ -68,6 +77,12 @@ google = oauth.register(
 LOCAL_TZ = ZoneInfo("America/Edmonton")  # Mountain Time (MST/MDT)
 ABSENCE_CUTOFF_HOURS = 5                  # Absences locked 5 hours before session start
 EARLY_CHECKIN_BUFFER_MINUTES = 10         # Students may sign in this many minutes early if a mentor/admin is already in
+
+# When a mentor/admin scans at the kiosk and no session is running, the kiosk asks them to
+# start one. These are the lengths they can pick from, and where the session is held.
+KIOSK_SESSION_HOURS_CHOICES = (1, 2, 4, 10, 12)
+KIOSK_SESSION_DEFAULT_HOURS = 2
+KIOSK_SESSION_LOCATION = "Shop"
 
 def get_local_now():
     """Returns current date and time in naive Mountain Time."""
@@ -89,6 +104,16 @@ def to_local_naive(dt):
 # no web login, and the kiosk asks for the visitor's name each time the badge is scanned in.
 VALID_ROLES = ('student', 'mentor', 'admin', 'visitor')
 
+class Team(db.Model):
+    """A team people can belong to. Each team has a colour (used for names on the
+    dashboards) and an optional transparent-PNG logo (printed on its ID cards)."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(60), unique=True, nullable=False)
+    color = db.Column(db.String(7), nullable=False, default='#4f46e5')
+    logo_filename = db.Column(db.String(255), nullable=True)
+
+    members = db.relationship('User', backref='team', lazy=True)
+
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -96,6 +121,8 @@ class User(db.Model):
     barcode = db.Column(db.String(50), unique=True, nullable=True)
     role = db.Column(db.String(20), default='student')
     photo_url = db.Column(db.String(255), nullable=True)
+    # A person is on at most one team. Visitor badges are never put on a team.
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=True)
 
     absences = db.relationship('AbsenceNotice', backref='user', lazy=True)
     logs = db.relationship('AttendanceLog', backref='user', lazy=True)
@@ -436,6 +463,14 @@ def get_photo(filename):
         abort(403)
 
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+@app.route('/team-logo/<int:team_id>')
+@login_required
+def team_logo(team_id):
+    team = Team.query.get_or_404(team_id)
+    if not team.logo_filename:
+        abort(404)
+    return send_from_directory(app.config['LOGO_FOLDER'], os.path.basename(team.logo_filename))
 
 # ==========================================
 # AUTHENTICATION ROUTES
@@ -1064,6 +1099,8 @@ def admin_users():
                 flash("You can't change your own account to a visitor; that would lock you out.", "danger")
             elif user:
                 user.role = new_role
+                if new_role == 'visitor':
+                    user.team_id = None   # visitor badges are never on a team
                 db.session.commit()
                 flash(f"Updated role for {user.name or user.email} to {new_role}.", "success")
                 
@@ -1104,7 +1141,93 @@ def admin_users():
         return redirect(url_for('admin_users'))
 
     users = User.query.all()
-    return render_template('admin_users.html', users=users)
+    teams = Team.query.order_by(db.func.lower(Team.name)).all()
+    return render_template('admin_users.html', users=users, teams=teams)
+
+# ==========================================
+# QUICK ADD USER (ADMIN)
+# ==========================================
+# A single-purpose form for adding someone fast: barcode (typed, scanned, or read by the
+# camera), name, team, email. Stays on the page after saving so the next person can follow.
+
+QUICK_ADD_ROLES = ('student', 'mentor', 'admin')
+_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+def _who(user):
+    return user.name or user.email
+
+
+@app.route('/admin/users/check')
+@role_required('admin')
+def admin_user_check():
+    """Live duplicate check for the Add User form."""
+    barcode = request.args.get('barcode', '').strip()
+    email = request.args.get('email', '').strip().lower()
+    result = {"barcode_taken": None, "email_taken": None}
+    if barcode:
+        other = User.query.filter_by(barcode=barcode).first()
+        if other:
+            result["barcode_taken"] = _who(other)
+    if email:
+        other = User.query.filter_by(email=email).first()
+        if other:
+            result["email_taken"] = _who(other)
+    return jsonify(result)
+
+
+@app.route('/admin/users/new', methods=['GET', 'POST'])
+@role_required('admin')
+def admin_user_new():
+    teams = Team.query.order_by(db.func.lower(Team.name)).all()
+    form = {"barcode": "", "name": "", "email": "", "team_id": "", "role": "student"}
+
+    if request.method == 'POST':
+        form["barcode"] = request.form.get('barcode', '').strip()
+        form["name"] = " ".join(request.form.get('name', '').split())
+        form["email"] = request.form.get('email', '').strip().lower()
+        form["team_id"] = request.form.get('team_id', '')
+        form["role"] = request.form.get('role', 'student')
+        team = _get_or_none(Team, request.form.get('team_id', type=int))
+
+        error = None
+        if not form["barcode"]:
+            error = "Enter or scan a barcode."
+        elif len(form["barcode"]) > 50:
+            error = "That barcode is too long (50 characters at most)."
+        elif not form["name"]:
+            error = "Enter their name."
+        elif len(form["name"]) > 100:
+            error = "That name is too long (100 characters at most)."
+        elif not form["email"] or not _EMAIL_RE.match(form["email"]) or len(form["email"]) > 120:
+            error = "Enter a valid email address."
+        elif form["role"] not in QUICK_ADD_ROLES:
+            error = "Pick a role."
+        elif form["team_id"] and not team:
+            error = "That team no longer exists."
+        else:
+            barcode_owner = User.query.filter_by(barcode=form["barcode"]).first()
+            email_owner = User.query.filter_by(email=form["email"]).first()
+            if barcode_owner:
+                error = f"That barcode already belongs to {_who(barcode_owner)}."
+            elif email_owner:
+                error = f"That email already belongs to {_who(email_owner)}."
+
+        if error:
+            flash(error, "danger")
+        else:
+            user = User(
+                email=form["email"], name=form["name"], barcode=form["barcode"],
+                role=form["role"], team_id=team.id if team else None
+            )
+            db.session.add(user)
+            db.session.commit()
+            where = f" on {team.name}" if team else ""
+            flash(f"Added {user.name} ({user.role}){where}. Barcode {user.barcode}. Ready for the next person.", "success")
+            return redirect(url_for('admin_user_new'))
+
+    return render_template('admin_user_new.html', teams=teams, form=form, roles=QUICK_ADD_ROLES)
+
 
 @app.route('/admin/logs')
 @role_required('admin')
@@ -1186,6 +1309,9 @@ BADGE_NAME_MAX_LINES = 3
 BADGE_TEXT_GAP = 22.0              # card floor to the bottom of the barcode
 BADGE_PHOTO_GAP = 6.0              # barcode to portrait
 BADGE_MIN_TEXT_SIZE = 5.0          # never shrink the printed code below this
+BADGE_LOGO_BOX_HEIGHT = 30.0       # team logo sits above the name, to the right of the portrait
+BADGE_LOGO_NAME_GAP = 4.0          # space between the logo box and the name block
+BADGE_LOGO_ROLE_CLEARANCE = 8.0     # keeps a two-line name clear of the role label under the portrait
 
 BARCODE_QUIET_MODULES = 10          # Code 128's minimum quiet zone, in modules
 MIN_BARCODE_MODULE_WIDTH = 0.6      # pt (~0.21 mm); the Code 128 floor is ~0.54 pt
@@ -1403,6 +1529,35 @@ def _load_card_photo(photo_url):
         return None
 
 
+@lru_cache(maxsize=64)
+def _read_logo(path, mtime):
+    """Open a team logo once and keep it for the whole print run. `mtime` is part of
+    the cache key so a replaced logo is picked up straight away."""
+    with Image.open(path) as src:
+        src.load()
+        image = src.convert("RGBA")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return ImageReader(buffer), image.width, image.height
+
+
+def _load_team_logo(team):
+    """Returns (ImageReader, width, height) for a team's logo, or None if the team has
+    no logo (or the file can't be read), in which case the card simply prints no logo."""
+    if not team or not team.logo_filename:
+        return None
+    logo_dir = os.path.abspath(app.config['LOGO_FOLDER'])
+    path = os.path.abspath(os.path.join(logo_dir, os.path.basename(team.logo_filename)))
+    if os.path.commonpath([path, logo_dir]) != logo_dir or not os.path.isfile(path):
+        return None
+    try:
+        return _read_logo(path, os.path.getmtime(path))
+    except Exception:
+        app.logger.warning("Could not read logo for team %s; printing the card without it.", team.id)
+        return None
+
+
 def _initials(name):
     """Up to two initials for the placeholder portrait."""
     parts = [p for p in (name or "").split() if p]
@@ -1497,10 +1652,27 @@ def _draw_id_card(pdf, user, x, y):
             _initials(display_name)
         )
 
-    # Name, optically centred against the portrait
-    lines = _wrap_lines(display_name, "Helvetica-Bold", BADGE_NAME_SIZE, name_width, BADGE_NAME_MAX_LINES)
-    first_baseline = photo_y + ((BADGE_PHOTO_SIZE - (len(lines) * BADGE_NAME_LEADING)) / 2) + (BADGE_NAME_LEADING * 0.75)
-    if len(lines) >= BADGE_NAME_MAX_LINES:
+    # Team logo (transparent PNG), top-right beside the portrait. People on no team,
+    # and teams with no logo, print exactly as before.
+    logo = _load_team_logo(user.team)
+    if logo is not None:
+        logo_reader, logo_w, logo_h = logo
+        scale = min(name_width / logo_w, BADGE_LOGO_BOX_HEIGHT / logo_h)
+        draw_w, draw_h = logo_w * scale, logo_h * scale
+        pdf.drawImage(logo_reader, name_x, photo_y + BADGE_PHOTO_SIZE - draw_h, draw_w, draw_h, mask='auto')
+        # The name sits in the space between the role label (below) and the logo (above).
+        name_region_bottom = photo_y + BADGE_LOGO_ROLE_CLEARANCE
+        name_region = BADGE_PHOTO_SIZE - BADGE_LOGO_BOX_HEIGHT - BADGE_LOGO_NAME_GAP - BADGE_LOGO_ROLE_CLEARANCE
+        name_max_lines = 2
+    else:
+        name_region_bottom = photo_y
+        name_region = BADGE_PHOTO_SIZE
+        name_max_lines = BADGE_NAME_MAX_LINES
+
+    # Name, optically centred against the portrait (or the space left under the logo)
+    lines = _wrap_lines(display_name, "Helvetica-Bold", BADGE_NAME_SIZE, name_width, name_max_lines)
+    first_baseline = name_region_bottom + ((name_region - (len(lines) * BADGE_NAME_LEADING)) / 2) + (BADGE_NAME_LEADING * 0.75)
+    if logo is None and len(lines) >= BADGE_NAME_MAX_LINES:
         first_baseline += 6   # lift a full-height name block clear of the role label below it
     pdf.setFillColorRGB(0.06, 0.09, 0.16)
     pdf.setFont("Helvetica-Bold", BADGE_NAME_SIZE)
@@ -1634,6 +1806,295 @@ def admin_id_cards():
 
     filename = f"{label}-{get_local_now():%Y-%m-%d}.pdf"
     return _pdf_response(_build_id_card_pdf(users), filename)
+
+
+# ==========================================
+# TEAMS (ADMIN)
+# ==========================================
+# Admins create teams (name, colour, optional transparent-PNG logo) and assign people to
+# them. Everyone is on at most one team; visitor badges are never on a team. A team's
+# colour is used for its members' names on the dashboards, and its logo is printed on
+# their ID cards.
+
+TEAM_NAME_MAX_LENGTH = 60
+TEAM_DEFAULT_COLOR = '#4f46e5'
+TEAM_LOGO_MAX_PIXELS = 600
+_HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+
+
+def _get_or_none(model, pk):
+    return model.query.get(pk) if pk else None
+
+
+def _clean_team_name(raw):
+    return " ".join((raw or "").split())[:TEAM_NAME_MAX_LENGTH]
+
+
+def _team_name_taken(name, exclude_id=None):
+    query = Team.query.filter(db.func.lower(Team.name) == name.lower())
+    if exclude_id:
+        query = query.filter(Team.id != exclude_id)
+    return query.first() is not None
+
+
+def _remove_logo_file(filename):
+    if not filename:
+        return
+    logo_dir = os.path.abspath(app.config['LOGO_FOLDER'])
+    path = os.path.abspath(os.path.join(logo_dir, os.path.basename(filename)))
+    if os.path.commonpath([path, logo_dir]) == logo_dir and os.path.isfile(path):
+        try:
+            os.remove(path)
+        except OSError:
+            app.logger.warning("Could not delete old team logo %s", path)
+
+
+def _store_team_logo(team, file_storage):
+    """Validate an uploaded logo and save it for `team`. Returns an error message, or
+    None on success. Only real PNG files are accepted; the image is re-encoded (keeping
+    its transparency) and shrunk, so nothing but clean pixels ever lands on disk."""
+    try:
+        image = Image.open(file_storage.stream)
+        if image.format != "PNG":
+            return "Team logos must be PNG files (transparent PNG works best)."
+        image.load()
+        image = image.convert("RGBA")
+    except Exception:
+        return "That file couldn't be read as a PNG image."
+
+    image.thumbnail((TEAM_LOGO_MAX_PIXELS, TEAM_LOGO_MAX_PIXELS), Image.LANCZOS)
+    filename = f"team_{team.id}_{uuid.uuid4().hex[:10]}.png"
+    image.save(os.path.join(app.config['LOGO_FOLDER'], filename), format="PNG", optimize=True)
+
+    _remove_logo_file(team.logo_filename)
+    team.logo_filename = filename
+    return None
+
+
+def _team_redirect():
+    if request.form.get('next') == 'users':
+        return redirect(url_for('admin_users'))
+    return redirect(url_for('admin_teams'))
+
+
+@app.route('/admin/teams', methods=['GET', 'POST'])
+@role_required('admin')
+def admin_teams():
+    if request.method == 'POST':
+        action = request.form.get('action')
+
+        if action == 'create':
+            name = _clean_team_name(request.form.get('name'))
+            color = (request.form.get('color') or TEAM_DEFAULT_COLOR).strip()
+            logo = request.files.get('logo')
+            if not name:
+                flash("Give the team a name.", "danger")
+            elif _team_name_taken(name):
+                flash(f"There is already a team called \"{name}\".", "danger")
+            elif not _HEX_COLOR_RE.match(color):
+                flash("Pick a valid team colour.", "danger")
+            else:
+                team = Team(name=name, color=color.lower())
+                db.session.add(team)
+                db.session.flush()   # gives the team an id for its logo file name
+                logo_error = _store_team_logo(team, logo) if logo and logo.filename else None
+                if logo_error:
+                    db.session.rollback()
+                    flash(logo_error, "danger")
+                else:
+                    db.session.commit()
+                    flash(f"Created team \"{name}\".", "success")
+
+        elif action == 'edit':
+            team = _get_or_none(Team, request.form.get('team_id', type=int))
+            name = _clean_team_name(request.form.get('name'))
+            color = (request.form.get('color') or '').strip()
+            logo = request.files.get('logo')
+            if not team:
+                flash("Team not found.", "danger")
+            elif not name:
+                flash("Give the team a name.", "danger")
+            elif _team_name_taken(name, exclude_id=team.id):
+                flash(f"There is already a team called \"{name}\".", "danger")
+            elif not _HEX_COLOR_RE.match(color):
+                flash("Pick a valid team colour.", "danger")
+            else:
+                team.name = name
+                team.color = color.lower()
+                logo_error = None
+                if request.form.get('remove_logo') and not (logo and logo.filename):
+                    _remove_logo_file(team.logo_filename)
+                    team.logo_filename = None
+                if logo and logo.filename:
+                    logo_error = _store_team_logo(team, logo)
+                if logo_error:
+                    db.session.rollback()
+                    flash(logo_error, "danger")
+                else:
+                    db.session.commit()
+                    flash(f"Updated team \"{team.name}\".", "success")
+
+        elif action == 'delete':
+            team = _get_or_none(Team, request.form.get('team_id', type=int))
+            if not team:
+                flash("Team not found.", "danger")
+            else:
+                name = team.name
+                User.query.filter_by(team_id=team.id).update({User.team_id: None})
+                _remove_logo_file(team.logo_filename)
+                db.session.delete(team)
+                db.session.commit()
+                flash(f"Deleted team \"{name}\". Its members are now on no team.", "success")
+
+        elif action == 'assign':
+            # team_id blank = take the person off their team
+            user = _get_or_none(User, request.form.get('user_id', type=int))
+            team_id = request.form.get('team_id', type=int)
+            team = _get_or_none(Team, team_id)
+            if not user:
+                flash("User not found.", "danger")
+            elif user.is_visitor:
+                flash("Visitor badges can't be put on a team.", "danger")
+            elif team_id and not team:
+                flash("Team not found.", "danger")
+            else:
+                user.team_id = team.id if team else None
+                db.session.commit()
+                who = user.name or user.email
+                if team:
+                    flash(f"{who} is now on {team.name}.", "success")
+                else:
+                    flash(f"{who} is no longer on a team.", "success")
+
+        return _team_redirect()
+
+    teams = Team.query.order_by(db.func.lower(Team.name)).all()
+    team_members = {t.id: sorted(t.members, key=_user_badge_sort_key) for t in teams}
+    assignable = sorted([u for u in User.query.all() if not u.is_visitor], key=_user_badge_sort_key)
+    unassigned_count = sum(1 for u in assignable if not u.team_id)
+    return render_template(
+        'admin_teams.html',
+        teams=teams,
+        team_members=team_members,
+        assignable=assignable,
+        unassigned_count=unassigned_count,
+        default_color=TEAM_DEFAULT_COLOR
+    )
+
+
+@app.route('/admin/team-id-cards.pdf')
+@role_required('admin')
+def admin_team_id_cards():
+    """Download ID cards for everyone on one team (cards carry the team's logo)."""
+    team = _get_or_none(Team, request.args.get('team_id', type=int))
+    if not team:
+        flash("Pick a team to print.", "warning")
+        return redirect(url_for('admin_print_center'))
+    members = [u for u in team.members if not u.is_visitor]
+    if not members:
+        flash(f"{team.name} has no members yet, so there are no cards to print.", "warning")
+        return redirect(url_for('admin_print_center'))
+    slug = secure_filename(team.name) or f"team-{team.id}"
+    return _pdf_response(_build_id_card_pdf(members), f"id-cards-{slug}-{get_local_now():%Y-%m-%d}.pdf")
+
+
+def _user_total_hours(user):
+    """Same total the dashboards show: every finished log, manual adjustments included."""
+    return round(sum(log.duration_hours for log in user.logs), 2)
+
+
+def _build_team_report_pdf(teams):
+    """A PDF listing each team's members and their total hours."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=LETTER,
+        leftMargin=0.75 * inch, rightMargin=0.75 * inch,
+        topMargin=0.75 * inch, bottomMargin=0.75 * inch,
+        title="Team Hours Report", author="Robotics Attendance Portal"
+    )
+    base = getSampleStyleSheet()
+    title_style = ParagraphStyle('ReportTitle', parent=base['Title'], alignment=0, fontSize=20, spaceAfter=2)
+    meta_style = ParagraphStyle('ReportMeta', parent=base['Normal'], textColor=rl_colors.HexColor('#667085'), fontSize=9)
+    team_style = ParagraphStyle('ReportTeam', parent=base['Heading2'], spaceBefore=16, spaceAfter=6, keepWithNext=1)
+    cell_style = ParagraphStyle('ReportCell', parent=base['Normal'], fontSize=10, leading=12)
+    note_style = ParagraphStyle('ReportNote', parent=base['Normal'], textColor=rl_colors.HexColor('#667085'), fontSize=8, spaceBefore=14)
+
+    story = [
+        Paragraph("Team Hours Report", title_style),
+        Paragraph(f"Generated {get_local_now():%B %d, %Y at %I:%M %p} (Mountain Time)", meta_style),
+    ]
+
+    grand_total = 0.0
+    for team in teams:
+        members = sorted((u for u in team.members if not u.is_visitor), key=_user_badge_sort_key)
+        story.append(Paragraph(
+            f'<font color="{team.color}">&#9632;</font> {xml_escape(_pdf_safe(team.name))} '
+            f'<font size="9" color="#667085">({len(members)} member{"" if len(members) == 1 else "s"})</font>',
+            team_style
+        ))
+
+        rows = [["Name", "Role", "Total hours"]]
+        team_total = 0.0
+        for member in members:
+            hours = _user_total_hours(member)
+            team_total += hours
+            rows.append([
+                Paragraph(xml_escape(_pdf_safe(member.name) or _pdf_safe(member.email)), cell_style),
+                member.role.capitalize(),
+                f"{hours:.2f}"
+            ])
+        if not members:
+            rows.append([Paragraph("No members", cell_style), "", ""])
+        rows.append(["Team total", "", f"{team_total:.2f}"])
+        grand_total += team_total
+
+        table = Table(rows, colWidths=[3.4 * inch, 1.6 * inch, 1.5 * inch], repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor(team.color)),
+            ('TEXTCOLOR', (0, 0), (-1, 0), rl_colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -2), [rl_colors.white, rl_colors.HexColor('#f8fafc')]),
+            ('LINEBELOW', (0, 0), (-1, -2), 0.4, rl_colors.HexColor('#e2e8f0')),
+            ('LINEABOVE', (0, -1), (-1, -1), 0.8, rl_colors.HexColor('#94a3b8')),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(table)
+
+    if len(teams) > 1:
+        story.append(Spacer(1, 14))
+        story.append(Paragraph(f"<b>All teams combined: {grand_total:.2f} hours</b>", cell_style))
+    story.append(Paragraph(
+        "Hours are totals of finished sign-ins plus any manual adjustments. Someone who is still "
+        "signed in is not counted until they sign out.", note_style))
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
+@app.route('/admin/team-report.pdf')
+@role_required('admin')
+def admin_team_report():
+    """Total hours per person. One team with ?team_id=, or every team if it is left off."""
+    team_id = request.args.get('team_id', type=int)
+    if team_id:
+        team = _get_or_none(Team, team_id)
+        if not team:
+            flash("Team not found.", "danger")
+            return redirect(url_for('admin_teams'))
+        teams = [team]
+        label = secure_filename(team.name) or f"team-{team.id}"
+    else:
+        teams = Team.query.order_by(db.func.lower(Team.name)).all()
+        if not teams:
+            flash("Create a team first, then you can run a report.", "warning")
+            return redirect(url_for('admin_teams'))
+        label = "all-teams"
+    return _pdf_response(_build_team_report_pdf(teams), f"hours-report-{label}-{get_local_now():%Y-%m-%d}.pdf")
 
 
 # ==========================================
@@ -1840,7 +2301,8 @@ def admin_print_center():
         }
         for u in users
     ]
-    return render_template('admin_print.html', roster=roster, total=len(roster))
+    teams = Team.query.order_by(db.func.lower(Team.name)).all()
+    return render_template('admin_print.html', roster=roster, total=len(roster), teams=teams)
 
 # ==========================================
 # KIOSK ENGINE (BARCODE CHECK-IN/OUT)
@@ -1848,7 +2310,11 @@ def admin_print_center():
 
 @app.route('/kiosk')
 def kiosk_page():
-    return render_template('kiosk.html')
+    return render_template(
+        'kiosk.html',
+        session_hours=KIOSK_SESSION_HOURS_CHOICES,
+        default_session_hours=KIOSK_SESSION_DEFAULT_HOURS
+    )
 
 @app.route('/kiosk/scan', methods=['POST'])
 def kiosk_scan():
@@ -1923,8 +2389,55 @@ def kiosk_scan():
             BuildSession.end_time >= now
         ).order_by(BuildSession.start_time.asc()).first()
 
+        # Once a mentor/admin is signed in, everyone else can sign in too, even if the
+        # session's scheduled window has run out: they join the mentor's session.
+        if not candidate_session and not user.is_mentor_or_admin:
+            mentor_log = AttendanceLog.query.join(User).filter(
+                AttendanceLog.check_out.is_(None),
+                AttendanceLog.session_id.isnot(None),
+                User.role.in_(['mentor', 'admin'])
+            ).order_by(AttendanceLog.check_in.desc()).first()
+            if mentor_log:
+                candidate_session = mentor_log.session
+
+        created_session = None
         if not candidate_session:
-            return jsonify({"status": "error", "message": "No Active Build Session Right Now"}), 400
+            if not user.is_mentor_or_admin:
+                return jsonify({"status": "error", "message": "No Active Build Session Right Now"}), 400
+
+            # A mentor/admin is here but nothing is scheduled: ask them to start a session.
+            # First scan has no session details, so the kiosk shows its small form and
+            # scans again with the session name and length.
+            session_title = " ".join(str(request.json.get('session_title') or "").split())[:100]
+            if not session_title:
+                return jsonify({
+                    "status": "need_session",
+                    "message": "No session is running. Start one to sign in."
+                })
+            if len(session_title) < 2:
+                return jsonify({"status": "error", "message": "Please enter a session name."}), 400
+            # If the next person's scanner fires while the form is open, the "name" is really
+            # another badge's code. Refuse it rather than saving a barcode as a session name.
+            if User.query.filter_by(barcode=session_title).first():
+                return jsonify({"status": "error", "message": "That looks like a badge code. Please type a session name."}), 400
+            try:
+                session_hours = int(str(request.json.get('session_hours')).strip())
+            except (TypeError, ValueError):
+                session_hours = None
+            if session_hours not in KIOSK_SESSION_HOURS_CHOICES:
+                return jsonify({"status": "error", "message": "Please choose how long the session will run."}), 400
+
+            session_start = now.replace(microsecond=0)
+            created_session = BuildSession(
+                title=session_title,
+                location=KIOSK_SESSION_LOCATION,
+                start_time=session_start,
+                end_time=session_start + timedelta(hours=session_hours),
+                created_by=user.id
+            )
+            db.session.add(created_session)
+            db.session.flush()
+            candidate_session = created_session
 
         in_buffer = now < candidate_session.start_time
 
@@ -1966,6 +2479,9 @@ def kiosk_scan():
         db.session.commit()
 
         message = f"User ({barcode}) signed in!"
+        if created_session:
+            message = (f"Session \u201c{created_session.title}\u201d started "
+                       f"(until {created_session.end_time:%I:%M %p}). User ({barcode}) signed in!")
         if in_buffer:
             message = f"User ({barcode}) signed in early — {candidate_session.title} starts soon!"
         if user.is_visitor:
