@@ -3,6 +3,7 @@
 {% block title %}Student Dashboard{% endblock %}
 
 {% block content %}
+{% from "_team.html" import team_name, team_badge %}
 <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet" />
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
 
@@ -53,8 +54,9 @@
     <img src="{{ url_for('get_photo', filename=user.photo_url.split('/')[-1]) }}" class="avatar-md me-3" alt="Profile Photo">
     {% endif %}
     <div>
-        <h2 class="mb-0 fw-bold">Welcome, {{ user.name or user.email }}</h2>
+        <h2 class="mb-0 fw-bold">Welcome, {{ team_name(user) }}</h2>
         <small class="text-muted">{{ user.email }}</small>
+        <span class="ms-2 align-middle">{{ team_badge(user) }}</span>
     </div>
 </div>
 

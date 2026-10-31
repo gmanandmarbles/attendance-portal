@@ -247,6 +247,56 @@
             margin-bottom: 0.5rem;
         }
 
+        /* Start-a-session prompt (mentors/admins when nothing is running) */
+        #sessionModal { max-width: 440px; }
+
+        #sessionModal input {
+            font-size: 1.25rem;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        #sessionModal .field-label {
+            display: block;
+            text-align: left;
+            color: #94a3b8;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin: 0.75rem 0 0.4rem;
+        }
+
+        .hour-choices {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .setup-modal .hour-btn {
+            flex: 1;
+            width: auto;
+            padding: 0.75rem 0;
+            background-color: #0f172a;
+            border: 1px solid #475569;
+            color: #cbd5e1;
+        }
+
+        .setup-modal .hour-btn:hover { background-color: #334155; }
+
+        .setup-modal .hour-btn.selected {
+            background-color: #2563eb;
+            border-color: #60a5fa;
+            color: #ffffff;
+        }
+
+        #sessionError {
+            min-height: 1.4em;
+            margin-bottom: 0.75rem;
+            color: #f87171;
+            font-size: 0.9rem;
+        }
+
         .hidden {
             display: none !important;
         }
@@ -294,6 +344,25 @@
         </div>
     </div>
 
+    <!-- Shown when a mentor/admin scans and no session is running: start one, then sign in -->
+    <div id="sessionOverlay" class="setup-overlay hidden">
+        <div class="setup-modal" id="sessionModal">
+            <h2>No session is running</h2>
+            <p style="color: #94a3b8; font-size: 0.95rem; margin-top: 0.5rem;">Start one now and you'll be signed in to it. It begins right away at the Shop.</p>
+            <label class="field-label" for="sessionNameInput">Session name</label>
+            <input type="text" id="sessionNameInput" placeholder="e.g. Saturday Build Day" maxlength="100" autocomplete="off">
+            <label class="field-label">How long will it run?</label>
+            <div class="hour-choices" id="hourChoices">
+                {% for h in session_hours %}
+                <button type="button" class="hour-btn{% if h == default_session_hours %} selected{% endif %}" data-hours="{{ h }}">{{ h }} hr</button>
+                {% endfor %}
+            </div>
+            <div id="sessionError" aria-live="polite"></div>
+            <button id="sessionSubmitBtn" type="button">Start Session &amp; Sign In</button>
+            <button id="sessionCancelBtn" type="button" class="secondary">Cancel</button>
+        </div>
+    </div>
+
     <script>
         const input = document.getElementById('barcodeInput');
         const alertBox = document.getElementById('statusAlert');
@@ -305,10 +374,20 @@
         const nameSubmitBtn = document.getElementById('nameSubmitBtn');
         const nameCancelBtn = document.getElementById('nameCancelBtn');
 
-        const NAME_PROMPT_TIMEOUT_MS = 45000;   // give up and return to scanning if nobody types
+        const sessionOverlay = document.getElementById('sessionOverlay');
+        const sessionNameInput = document.getElementById('sessionNameInput');
+        const sessionError = document.getElementById('sessionError');
+        const sessionSubmitBtn = document.getElementById('sessionSubmitBtn');
+        const sessionCancelBtn = document.getElementById('sessionCancelBtn');
+        const hourChoices = document.getElementById('hourChoices');
+
+        const NAME_PROMPT_TIMEOUT_MS = 45000;      // give up and return to scanning if nobody types
+        const SESSION_PROMPT_TIMEOUT_MS = 90000;
         let kioskPassword = "";
         let pendingBarcode = null;
+        let pendingSessionBarcode = null;
         let nameTimer = null;
+        let sessionTimer = null;
 
         // Cookie Helpers
         function setCookie(name, value, days = 30) {
@@ -370,8 +449,13 @@
                 if (!e.target.closest('button')) nameInput.focus();
                 return;
             }
+            if (!sessionOverlay.classList.contains('hidden')) {
+                if (!e.target.closest('button') && e.target !== sessionNameInput) sessionNameInput.focus();
+                return;
+            }
             if (setupOverlay.classList.contains('hidden') &&
                 nameOverlay.classList.contains('hidden') &&
+                sessionOverlay.classList.contains('hidden') &&
                 e.target !== document.querySelector('.reset-pass-btn')) {
                 input.focus();
             }
@@ -433,10 +517,83 @@
             showResult(false, "Sign-in cancelled.");
         });
 
-        // Sends a scan to the server. Visitors need a second call that includes their name.
-        function submitScan(barcode, visitorName) {
+        // Start-a-session prompt
+        function selectedHours() {
+            const chosen = hourChoices.querySelector('.hour-btn.selected');
+            return chosen ? parseInt(chosen.dataset.hours, 10) : null;
+        }
+
+        function openSessionPrompt(barcode) {
+            pendingSessionBarcode = barcode;
+            sessionNameInput.value = '';
+            sessionError.textContent = '';
+            sessionOverlay.classList.remove('hidden');
+            sessionNameInput.focus();
+            resetSessionTimer();
+        }
+
+        function closeSessionPrompt() {
+            clearTimeout(sessionTimer);
+            pendingSessionBarcode = null;
+            sessionOverlay.classList.add('hidden');
+            sessionNameInput.value = '';
+            sessionError.textContent = '';
+            input.focus();
+        }
+
+        function resetSessionTimer() {
+            clearTimeout(sessionTimer);
+            sessionTimer = setTimeout(() => {
+                if (pendingSessionBarcode) {
+                    closeSessionPrompt();
+                    showResult(false, "Sign-in cancelled (no session was started).");
+                }
+            }, SESSION_PROMPT_TIMEOUT_MS);
+        }
+
+        function submitSession() {
+            if (!pendingSessionBarcode) return;
+            const title = sessionNameInput.value.trim();
+            const hours = selectedHours();
+            if (title.length < 2) {
+                sessionError.textContent = "Please enter a session name.";
+                sessionNameInput.focus();
+                return;
+            }
+            if (!hours) {
+                sessionError.textContent = "Please choose how long the session will run.";
+                return;
+            }
+            submitScan(pendingSessionBarcode, null, { title: title, hours: hours });
+        }
+
+        hourChoices.addEventListener('click', (e) => {
+            const btn = e.target.closest('.hour-btn');
+            if (!btn) return;
+            hourChoices.querySelectorAll('.hour-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            resetSessionTimer();
+        });
+        sessionNameInput.addEventListener('input', resetSessionTimer);
+        sessionNameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); submitSession(); }
+            if (e.key === 'Escape') { closeSessionPrompt(); showResult(false, "Sign-in cancelled."); }
+        });
+        sessionSubmitBtn.addEventListener('click', submitSession);
+        sessionCancelBtn.addEventListener('click', () => {
+            closeSessionPrompt();
+            showResult(false, "Sign-in cancelled.");
+        });
+
+        // Sends a scan to the server. Visitors need a second call that includes their name;
+        // mentors/admins scanning with no session running need one that includes the new session.
+        function submitScan(barcode, visitorName, newSession) {
             const payload = { barcode: barcode, kiosk_password: kioskPassword };
             if (visitorName) payload.visitor_name = visitorName;
+            if (newSession) {
+                payload.session_title = newSession.title;
+                payload.session_hours = newSession.hours;
+            }
 
             return fetch('/kiosk/scan', {
                 method: 'POST',
@@ -449,9 +606,20 @@
                     alertBox.className = "";
                     alertBox.innerText = "";
                     openNamePrompt(barcode);
+                } else if (data.status === 'need_session') {
+                    alertBox.className = "";
+                    alertBox.innerText = "";
+                    openSessionPrompt(barcode);
                 } else if (data.status === 'success') {
                     if (pendingBarcode) closeNamePrompt();
+                    if (pendingSessionBarcode) closeSessionPrompt();
                     showResult(true, data.message);
+                } else if (pendingSessionBarcode) {
+                    // A problem with the session details: keep the form open so it can be fixed.
+                    sessionError.textContent = data.message;
+                    sessionNameInput.focus();
+                    sessionNameInput.select();
+                    resetSessionTimer();
                 } else if (pendingBarcode) {
                     // A problem with the name itself: keep the prompt open so it can be fixed.
                     nameError.textContent = data.message;
@@ -464,6 +632,7 @@
             })
             .catch(() => {
                 if (pendingBarcode) closeNamePrompt();
+                if (pendingSessionBarcode) closeSessionPrompt();
                 showResult(false, "Network Communication Error");
             });
         }
