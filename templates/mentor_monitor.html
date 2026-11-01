@@ -4,7 +4,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="30">
     <title>Live Attendance Monitor</title>
     <style>
         :root {
@@ -147,45 +146,154 @@
         }
 
         .student-card.card-enter {
-            animation: card-pop 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.35) both;
+            animation: card-pop 0.95s cubic-bezier(0.16, 1.1, 0.3, 1) both;
+            z-index: 6;
+            border-color: #10b981;
+        }
+
+        .student-card.card-enter::after {
+            content: '';
+            position: absolute;
+            inset: -5px;
+            border: 5px solid rgba(16, 185, 129, 0.9);
+            border-radius: 17px;
+            pointer-events: none;
+            animation: card-ring 0.85s ease-out 2;
         }
 
         .student-card.card-leave {
-            animation: card-explode 0.65s ease-in forwards;
+            animation: card-explode 0.8s cubic-bezier(0.6, 0, 0.9, 0.2) forwards;
             pointer-events: none;
-            z-index: 5;
+            z-index: 7;
+            border-color: #f97316;
         }
 
         @keyframes card-pop {
-            0% { opacity: 0; transform: scale(0.55) translateY(24px); box-shadow: 0 0 0 0 rgba(15, 118, 110, 0.55); }
-            55% { opacity: 1; transform: scale(1.06) translateY(0); box-shadow: 0 0 0 14px rgba(15, 118, 110, 0); }
-            100% { opacity: 1; transform: scale(1) translateY(0); box-shadow: 0 8px 20px rgba(23, 32, 51, 0.06); }
+            0% { opacity: 0; transform: scale(0.18) rotate(-10deg); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.9); }
+            30% { opacity: 1; transform: scale(1.22) rotate(3deg); box-shadow: 0 0 0 26px rgba(16, 185, 129, 0), 0 0 100px 34px rgba(16, 185, 129, 0.8); }
+            50% { transform: scale(0.94) rotate(-1deg); }
+            68% { transform: scale(1.09) rotate(1deg); }
+            82% { transform: scale(0.98) rotate(0); }
+            100% { opacity: 1; transform: scale(1) rotate(0); box-shadow: 0 8px 20px rgba(23, 32, 51, 0.06); }
+        }
+
+        @keyframes card-ring {
+            0% { opacity: 1; transform: scale(0.9); }
+            100% { opacity: 0; transform: scale(1.75); }
         }
 
         @keyframes card-explode {
             0% { opacity: 1; transform: scale(1) rotate(0); filter: brightness(1); }
-            25% { opacity: 1; transform: scale(1.08) rotate(-2deg); filter: brightness(1.75); }
-            60% { opacity: 0.65; transform: scale(1.18) rotate(3deg); filter: brightness(2); }
-            100% { opacity: 0; transform: scale(1.55) rotate(8deg); filter: blur(5px) brightness(2.4); }
+            20% { opacity: 1; transform: scale(1.3) rotate(-4deg); filter: brightness(2) saturate(2); }
+            55% { opacity: 0.9; transform: scale(1.9) rotate(7deg); filter: brightness(2.8) blur(1px); }
+            100% { opacity: 0; transform: scale(2.8) rotate(18deg); filter: blur(10px) brightness(3); }
         }
 
         .explosion-particle {
             position: fixed;
-            width: 10px;
-            height: 10px;
+            width: var(--size, 12px);
+            height: var(--size, 12px);
             border-radius: 3px;
             pointer-events: none;
             z-index: 9999;
-            animation: particle-fly 0.68s ease-out forwards;
+            animation: particle-fly var(--duration, 0.95s) cubic-bezier(0.1, 0.7, 0.2, 1) forwards;
         }
 
         @keyframes particle-fly {
             0% { opacity: 1; transform: translate(0, 0) rotate(0) scale(1); }
-            100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.15); }
+            100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.05); }
+        }
+
+        .monitor-toasts {
+            position: fixed;
+            top: clamp(1rem, 3vh, 2.5rem);
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.8rem;
+            width: min(96vw, 1200px);
+            pointer-events: none;
+        }
+
+        .monitor-toast {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: clamp(0.6rem, 1.5vw, 1.2rem);
+            width: fit-content;
+            max-width: 96vw;
+            padding: clamp(0.7rem, 1.5vw, 1.2rem) clamp(1.25rem, 3vw, 3rem);
+            border-radius: 999px;
+            color: white;
+            font: 900 clamp(1.5rem, 4.4vw, 3.4rem)/1 Arial, Helvetica, sans-serif;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            text-align: center;
+            box-shadow: 0 30px 80px rgba(15, 23, 42, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+            animation: toast-in 0.55s cubic-bezier(0.15, 1.2, 0.3, 1) both,
+                       toast-out 0.4s ease-in 2.4s forwards;
+        }
+
+        .monitor-toast.in { background: linear-gradient(135deg, #047857, #10b981 55%, #14b8a6); }
+        .monitor-toast.out { background: linear-gradient(135deg, #b45309, #ef4444 55%, #dc2626); }
+        .monitor-toast .toast-icon { font-size: 1.15em; line-height: 1; }
+        .monitor-toast .toast-name { overflow-wrap: anywhere; }
+
+        @keyframes toast-in {
+            0% { opacity: 0; transform: translateY(-60px) scale(0.55); }
+            62% { opacity: 1; transform: translateY(8px) scale(1.06); }
+            100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes toast-out {
+            to { opacity: 0; transform: translateY(-40px) scale(0.75); }
+        }
+
+        .monitor-flash {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 9997;
+            opacity: 0;
+        }
+
+        .monitor-flash.flash-in { animation: flash-in 0.9s ease-out; }
+        .monitor-flash.flash-out { animation: flash-out 0.9s ease-out; }
+
+        @keyframes flash-in {
+            0% { opacity: 0; background: radial-gradient(circle at center, rgba(16, 185, 129, 0.9), transparent 70%); }
+            30% { opacity: 0.85; }
+            100% { opacity: 0; background: radial-gradient(circle at center, rgba(16, 185, 129, 0), transparent 70%); }
+        }
+
+        @keyframes flash-out {
+            0% { opacity: 0; background: radial-gradient(circle at center, rgba(239, 68, 68, 0.95), transparent 70%); }
+            25% { opacity: 0.9; }
+            100% { opacity: 0; background: radial-gradient(circle at center, rgba(239, 68, 68, 0), transparent 70%); }
+        }
+
+        body.screen-shake { animation: screen-shake 0.5s linear; }
+
+        @keyframes screen-shake {
+            0%, 100% { transform: translate(0, 0) rotate(0); }
+            15% { transform: translate(-12px, 7px) rotate(-0.4deg); }
+            30% { transform: translate(14px, -6px) rotate(0.45deg); }
+            45% { transform: translate(-9px, -5px) rotate(-0.3deg); }
+            60% { transform: translate(8px, 6px) rotate(0.25deg); }
+            75% { transform: translate(-4px, 3px) rotate(-0.15deg); }
         }
 
         @media (prefers-reduced-motion: reduce) {
-            .student-card.card-enter, .student-card.card-leave, .explosion-particle { animation: none; }
+            .student-card.card-enter,
+            .student-card.card-leave,
+            .student-card.card-enter::after,
+            .explosion-particle,
+            .monitor-toast,
+            .monitor-flash,
+            body.screen-shake { animation: none !important; }
         }
 
         .avatar {
@@ -262,7 +370,7 @@
         <section class="student-grid" id="studentGrid" aria-label="People currently signed in"
                  {% if not signed_in_logs %}hidden{% endif %}>
             {% for log in signed_in_logs %}
-            <article class="student-card {% if log.user.role in ['mentor', 'admin'] %}is-staff{% endif %}" data-log-id="{{ log.id }}">
+            <article class="student-card {% if log.user.role in ['mentor', 'admin'] %}is-staff{% endif %}" data-log-id="{{ log.id }}" data-log-name="{{ log.display_name }}">
                 <div class="avatar">
                     {% if log.user.photo_url %}
                     <img src="{{ url_for('get_photo', filename=log.user.photo_url.split('/')[-1]) }}" alt="">
@@ -285,6 +393,9 @@
         <div class="empty-state" id="emptyState" {% if signed_in_logs %}hidden{% endif %}>No one is currently signed in.</div>
     </main>
 
+    <div class="monitor-toasts" id="monitorToasts" aria-live="assertive"></div>
+    <div class="monitor-flash" id="monitorFlash"></div>
+
     <script>
         document.getElementById('fullscreenButton').addEventListener('click', function () {
             if (!document.fullscreenElement) {
@@ -303,6 +414,8 @@
             const statusEl = document.getElementById('sessionStatus');
             const statusDot = document.getElementById('sessionDot');
             const updatedEl = document.getElementById('updatedAt');
+            const toastsEl = document.getElementById('monitorToasts');
+            const flashEl = document.getElementById('monitorFlash');
 
             const dataUrl = "{{ url_for('mentor_monitor_data') }}";
             const streamUrl = "{{ url_for('mentor_monitor_stream') }}";
@@ -316,6 +429,7 @@
                 const card = document.createElement('article');
                 card.className = 'student-card' + (log.is_staff ? ' is-staff' : '');
                 card.dataset.logId = String(log.id);
+                card.dataset.logName = log.name;
 
                 const avatar = document.createElement('div');
                 avatar.className = 'avatar';
@@ -370,35 +484,118 @@
                 return card;
             }
 
-            function explodeCard(card) {
-                if (card.dataset.leaving === '1') return;
-                card.dataset.leaving = '1';
+            function spawnParticles(centerX, centerY, colors, count, options) {
+                const settings = options || {};
+                const minDistance = settings.minDistance || 80;
+                const maxDistance = settings.maxDistance || 320;
+                const minSize = settings.minSize || 8;
+                const maxSize = settings.maxSize || 20;
+                const minDuration = settings.minDuration || 0.7;
+                const maxDuration = settings.maxDuration || 1.2;
 
-                const rect = card.getBoundingClientRect();
-                const colors = ['#0f766e', '#14b8a6', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6'];
-                const centerX = rect.left + rect.width / 2;
-                const centerY = rect.top + rect.height / 2;
-
-                for (let i = 0; i < 18; i += 1) {
+                for (let i = 0; i < count; i += 1) {
                     const particle = document.createElement('span');
                     particle.className = 'explosion-particle';
                     particle.style.left = centerX + 'px';
                     particle.style.top = centerY + 'px';
                     particle.style.backgroundColor = colors[i % colors.length];
-                    particle.style.animationDelay = (Math.random() * 0.08) + 's';
+                    particle.style.setProperty('--size', (minSize + Math.random() * (maxSize - minSize)) + 'px');
+
+                    const duration = minDuration + Math.random() * (maxDuration - minDuration);
+                    particle.style.setProperty('--duration', duration + 's');
+                    particle.style.animationDelay = (Math.random() * 0.12) + 's';
 
                     const angle = Math.random() * Math.PI * 2;
-                    const distance = 70 + Math.random() * 190;
+                    const distance = minDistance + Math.random() * (maxDistance - minDistance);
                     particle.style.setProperty('--dx', (Math.cos(angle) * distance) + 'px');
                     particle.style.setProperty('--dy', (Math.sin(angle) * distance) + 'px');
-                    particle.style.setProperty('--rot', (Math.random() * 720 - 360) + 'deg');
+                    particle.style.setProperty('--rot', (Math.random() * 900 - 450) + 'deg');
+                    particle.style.borderRadius = Math.random() > 0.5 ? '50%' : '3px';
 
                     document.body.appendChild(particle);
-                    window.setTimeout(() => particle.remove(), 900);
+                    window.setTimeout(() => particle.remove(), (duration + 0.3) * 1000);
                 }
+            }
+
+            function showMonitorToast(kind, name) {
+                const toast = document.createElement('div');
+                toast.className = 'monitor-toast ' + kind;
+
+                const icon = document.createElement('span');
+                icon.className = 'toast-icon';
+                icon.textContent = kind === 'in' ? '\u2713' : '\u{1F4A5}';
+
+                const nameEl = document.createElement('span');
+                nameEl.className = 'toast-name';
+                nameEl.textContent = name || 'Someone';
+
+                const action = document.createElement('span');
+                action.textContent = kind === 'in' ? 'SIGNED IN' : 'CHECKED OUT';
+
+                toast.appendChild(icon);
+                toast.appendChild(nameEl);
+                toast.appendChild(action);
+                toastsEl.appendChild(toast);
+                window.setTimeout(() => toast.remove(), 3000);
+            }
+
+            function flashScreen(kind) {
+                flashEl.className = 'monitor-flash';
+                void flashEl.offsetWidth;  // restart the animation
+                flashEl.classList.add(kind === 'in' ? 'flash-in' : 'flash-out');
+            }
+
+            function screenShake() {
+                document.body.classList.remove('screen-shake');
+                void document.body.offsetWidth;
+                document.body.classList.add('screen-shake');
+                window.setTimeout(() => document.body.classList.remove('screen-shake'), 520);
+            }
+
+            function centerOf(card) {
+                const rect = card.getBoundingClientRect();
+                return {
+                    x: rect.left + rect.width / 2,
+                    y: rect.top + rect.height / 2,
+                };
+            }
+
+            function celebrateCheckIn(card, log) {
+                const center = centerOf(card);
+                const colors = ['#047857', '#10b981', '#14b8a6', '#22c55e', '#fbbf24'];
+                spawnParticles(center.x, center.y, colors, 46, {
+                    minDistance: 90,
+                    maxDistance: 320,
+                    minSize: 7,
+                    maxSize: 17,
+                    minDuration: 0.6,
+                    maxDuration: 1.05,
+                });
+                flashScreen('in');
+                showMonitorToast('in', log.name);
+            }
+
+            function explodeCard(card) {
+                if (card.dataset.leaving === '1') return;
+                card.dataset.leaving = '1';
+
+                const center = centerOf(card);
+                const colors = ['#b45309', '#ef4444', '#dc2626', '#f97316', '#fbbf24', '#7f1d1d'];
+                spawnParticles(center.x, center.y, colors, 70, {
+                    minDistance: 120,
+                    maxDistance: 470,
+                    minSize: 8,
+                    maxSize: 28,
+                    minDuration: 0.8,
+                    maxDuration: 1.4,
+                });
+
+                showMonitorToast('out', card.dataset.logName || 'Someone');
+                flashScreen('out');
+                screenShake();
 
                 card.classList.add('card-leave');
-                window.setTimeout(() => card.remove(), 700);
+                window.setTimeout(() => card.remove(), 900);
             }
 
             function renderLogs(logs) {
@@ -414,12 +611,15 @@
 
                     const card = buildCard(log);
                     card.style.animationDelay = Math.min(index * 35, 250) + 'ms';
+                    grid.hidden = false;
+                    emptyState.hidden = true;
                     grid.appendChild(card);
+                    celebrateCheckIn(card, log);
                     card.classList.add('card-enter');
                     window.setTimeout(() => {
                         card.classList.remove('card-enter');
                         card.style.animationDelay = '';
-                    }, 950);
+                    }, 1250);
                 });
 
                 existing.forEach((card, id) => {
@@ -439,7 +639,7 @@
                             grid.hidden = true;
                             emptyState.hidden = false;
                         }
-                    }, 760);
+                    }, 1000);
                 }
             }
 

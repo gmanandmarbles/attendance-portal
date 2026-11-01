@@ -161,110 +161,6 @@
             border: 1px solid rgba(239, 68, 68, 0.2);
         }
 
-        /* Full-screen check-in / check-out confirmation */
-        .confirmation-overlay {
-            position: fixed;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: radial-gradient(circle at center, rgba(15, 23, 42, 0.55), rgba(15, 23, 42, 0.9));
-            opacity: 0;
-            visibility: hidden;
-            pointer-events: none;
-            z-index: 80;
-            transition: opacity 0.25s ease, visibility 0.25s;
-        }
-
-        .confirmation-overlay.show {
-            opacity: 1;
-            visibility: visible;
-        }
-
-        .confirmation-card {
-            background: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 24px;
-            padding: 2.5rem 3.25rem;
-            text-align: center;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
-            transform: scale(0.6) translateY(30px);
-            opacity: 0;
-        }
-
-        .confirmation-overlay.show .confirmation-card {
-            animation: confirm-pop 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.35) forwards;
-        }
-
-        .confirmation-overlay.is-out.show .confirmation-card {
-            animation: confirm-out 0.55s ease-in forwards;
-        }
-
-        .confirm-icon {
-            width: 96px;
-            height: 96px;
-            margin: 0 auto 1.25rem;
-            display: grid;
-            place-items: center;
-            border-radius: 50%;
-            background: rgba(34, 197, 94, 0.15);
-            border: 2px solid rgba(34, 197, 94, 0.55);
-            color: #4ade80;
-            font-size: 3rem;
-            position: relative;
-        }
-
-        .confirmation-overlay.is-out .confirm-icon {
-            background: rgba(245, 158, 11, 0.15);
-            border-color: rgba(245, 158, 11, 0.55);
-            color: #fbbf24;
-        }
-
-        .confirm-icon::after {
-            content: '';
-            position: absolute;
-            inset: -7px;
-            border-radius: 50%;
-            border: 2px solid currentColor;
-            opacity: 0;
-            animation: confirm-ring 0.9s ease-out infinite;
-        }
-
-        .confirmation-overlay h2 {
-            color: #ffffff;
-            font-size: 1.9rem;
-            margin-bottom: 0.35rem;
-        }
-
-        .confirmation-overlay p {
-            color: #cbd5e1;
-            font-size: 1.35rem;
-            font-weight: 600;
-        }
-
-        @keyframes confirm-pop {
-            0% { opacity: 0; transform: scale(0.6) translateY(30px); }
-            65% { opacity: 1; transform: scale(1.05) translateY(0); }
-            100% { opacity: 1; transform: scale(1) translateY(0); }
-        }
-
-        @keyframes confirm-out {
-            0% { opacity: 1; transform: scale(1) rotate(0); filter: brightness(1); }
-            35% { opacity: 1; transform: scale(1.06) rotate(-2deg); filter: brightness(1.5); }
-            100% { opacity: 0; transform: scale(1.45) rotate(7deg); filter: blur(4px) brightness(2); }
-        }
-
-        @keyframes confirm-ring {
-            0% { opacity: 0.7; transform: scale(0.92); }
-            100% { opacity: 0; transform: scale(1.35); }
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-            .confirmation-overlay.show .confirmation-card,
-            .confirmation-overlay.is-out.show .confirmation-card,
-            .confirm-icon::after { animation: none; }
-        }
-
         /* Setup Overlay Modal */
         .setup-overlay {
             position: fixed;
@@ -427,14 +323,6 @@
         <div id="statusAlert"></div>
     </div>
 
-    <div id="confirmationOverlay" class="confirmation-overlay" aria-live="assertive">
-        <div class="confirmation-card">
-            <div class="confirm-icon" id="confirmIcon">&#10003;</div>
-            <h2 id="confirmTitle">Signed in</h2>
-            <p id="confirmSubtitle">Your badge was recorded.</p>
-        </div>
-    </div>
-
     <div id="setupOverlay" class="setup-overlay hidden">
         <div class="setup-modal">
             <h2>Kiosk Terminal Setup</h2>
@@ -493,11 +381,6 @@
         const sessionCancelBtn = document.getElementById('sessionCancelBtn');
         const hourChoices = document.getElementById('hourChoices');
 
-        const confirmationOverlay = document.getElementById('confirmationOverlay');
-        const confirmIcon = document.getElementById('confirmIcon');
-        const confirmTitle = document.getElementById('confirmTitle');
-        const confirmSubtitle = document.getElementById('confirmSubtitle');
-
         const NAME_PROMPT_TIMEOUT_MS = 45000;      // give up and return to scanning if nobody types
         const SESSION_PROMPT_TIMEOUT_MS = 90000;
         let kioskPassword = "";
@@ -505,7 +388,6 @@
         let pendingSessionBarcode = null;
         let nameTimer = null;
         let sessionTimer = null;
-        let confirmationTimer = null;
 
         // Cookie Helpers
         function setCookie(name, value, days = 30) {
@@ -582,26 +464,6 @@
         function showResult(ok, text) {
             alertBox.className = ok ? "status-success" : "status-error";
             alertBox.innerText = `${ok ? '✅' : '❌'} ${text}`;
-        }
-
-        // Big, unmissable confirmation so the person knows the scan registered.
-        // Deliberately generic: the kiosk must not echo names or other PII.
-        function showConfirmation(action) {
-            const isCheckOut = action === 'CHECK_OUT';
-            confirmIcon.textContent = isCheckOut ? '\u{1F44B}' : '\u2713';
-            confirmTitle.textContent = isCheckOut ? 'Signed out' : 'Signed in';
-            confirmSubtitle.textContent = isCheckOut
-                ? 'Your badge was recorded. See you next time!'
-                : 'Your badge was recorded. You are all set!';
-
-            confirmationOverlay.classList.remove('show', 'is-out');
-            void confirmationOverlay.offsetWidth;  // restart the entry animation
-            confirmationOverlay.classList.toggle('is-out', isCheckOut);
-            confirmationOverlay.classList.add('show');
-
-            clearTimeout(confirmationTimer);
-            confirmationTimer = setTimeout(() => confirmationOverlay.classList.remove('show'), 2200);
-            input.focus();
         }
 
         // Visitor name prompt
@@ -726,7 +588,6 @@
         // Sends a scan to the server. Visitors need a second call that includes their name;
         // mentors/admins scanning with no session running need one that includes the new session.
         function submitScan(barcode, visitorName, newSession) {
-            confirmationOverlay.classList.remove('show');
             const payload = { barcode: barcode, kiosk_password: kioskPassword };
             if (visitorName) payload.visitor_name = visitorName;
             if (newSession) {
@@ -753,7 +614,6 @@
                     if (pendingBarcode) closeNamePrompt();
                     if (pendingSessionBarcode) closeSessionPrompt();
                     showResult(true, data.message);
-                    showConfirmation(data.action);
                 } else if (pendingSessionBarcode) {
                     // A problem with the session details: keep the form open so it can be fixed.
                     sessionError.textContent = data.message;
