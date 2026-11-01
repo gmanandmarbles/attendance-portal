@@ -425,6 +425,82 @@
             let refreshing = false;
             let queuedRefresh = false;
 
+            const AUTO_SCROLL_SPEED = 0.065;          // pixels per millisecond
+            const AUTO_SCROLL_START_HOLD = 1400;      // pause before first movement
+            const AUTO_SCROLL_EDGE_HOLD = 2200;       // pause at the top/bottom
+            const AUTO_SCROLL_USER_PAUSE = 6000;      // pause after manual scrolling
+
+            let scrollDirection = 1;
+            let scrollLastTime = 0;
+            let scrollHoldUntil = 0;
+            let scrollPauseUntil = 0;
+            let wasOverflowing = false;
+            let scrollFrame = null;
+
+            function maxScrollTop() {
+                return Math.max(0, grid.scrollHeight - grid.clientHeight);
+            }
+
+            function autoScrollTick(timestamp) {
+                scrollFrame = window.requestAnimationFrame(autoScrollTick);
+
+                if (!scrollLastTime) scrollLastTime = timestamp;
+                const delta = Math.min(timestamp - scrollLastTime, 64);
+                scrollLastTime = timestamp;
+
+                if (document.hidden || timestamp < scrollPauseUntil) return;
+
+                const bottom = maxScrollTop();
+                if (bottom <= 4) {
+                    if (wasOverflowing) {
+                        wasOverflowing = false;
+                        scrollDirection = 1;
+                        grid.scrollTop = 0;
+                    }
+                    return;
+                }
+
+                if (!wasOverflowing) {
+                    wasOverflowing = true;
+                    scrollDirection = 1;
+                    scrollHoldUntil = timestamp + AUTO_SCROLL_START_HOLD;
+                    return;
+                }
+
+                if (timestamp < scrollHoldUntil) return;
+
+                const next = grid.scrollTop + (scrollDirection * AUTO_SCROLL_SPEED * delta);
+                if (scrollDirection > 0 && next >= bottom - 0.5) {
+                    grid.scrollTop = bottom;
+                    scrollDirection = -1;
+                    scrollHoldUntil = timestamp + AUTO_SCROLL_EDGE_HOLD;
+                    return;
+                }
+                if (scrollDirection < 0 && next <= 0.5) {
+                    grid.scrollTop = 0;
+                    scrollDirection = 1;
+                    scrollHoldUntil = timestamp + AUTO_SCROLL_EDGE_HOLD;
+                    return;
+                }
+                grid.scrollTop = next;
+            }
+
+            function pauseAutoScroll(ms) {
+                scrollPauseUntil = Math.max(scrollPauseUntil, performance.now() + ms);
+                scrollLastTime = 0;
+            }
+
+            grid.addEventListener('wheel', () => pauseAutoScroll(AUTO_SCROLL_USER_PAUSE), { passive: true });
+            grid.addEventListener('touchstart', () => pauseAutoScroll(AUTO_SCROLL_USER_PAUSE), { passive: true });
+            grid.addEventListener('pointerdown', () => pauseAutoScroll(AUTO_SCROLL_USER_PAUSE));
+
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                scrollFrame = window.requestAnimationFrame(autoScrollTick);
+                window.addEventListener('pagehide', () => {
+                    if (scrollFrame) window.cancelAnimationFrame(scrollFrame);
+                }, { once: true });
+            }
+
             function buildCard(log) {
                 const card = document.createElement('article');
                 card.className = 'student-card' + (log.is_staff ? ' is-staff' : '');
