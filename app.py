@@ -75,7 +75,7 @@ google = oauth.register(
 # ==========================================
 # TIMEZONE & CUTOFF CONFIGURATION
 # ==========================================
-LOCAL_TZ = ZoneInfo("America/Edmonton")  # Mountain Time (MST/MDT)
+LOCAL_TZ = ZoneInfo("America/Chicago")  # Central Time (CST/CDT)
 ABSENCE_CUTOFF_HOURS = 5                  # Absences locked 5 hours before session start
 EARLY_CHECKIN_BUFFER_MINUTES = 10         # Students may sign in this many minutes early if a mentor/admin is already in
 
@@ -86,16 +86,21 @@ KIOSK_SESSION_DEFAULT_HOURS = 2
 KIOSK_SESSION_LOCATION = "Shop"
 
 def get_local_now():
-    """Returns current date and time in naive Mountain Time."""
+    """Returns current date and time in naive Central Time."""
     return datetime.now(ZoneInfo("UTC")).astimezone(LOCAL_TZ).replace(tzinfo=None)
 
 def to_local_naive(dt):
-    """Ensures input timestamps are converted to naive Mountain Time objects."""
+    """Ensures input timestamps are converted to naive Central Time objects."""
     if dt is None:
         return None
     if dt.tzinfo is not None:
         return dt.astimezone(LOCAL_TZ).replace(tzinfo=None)
     return dt
+
+def local_tz_abbr(dt=None):
+    """Abbreviation for a naive Central Time datetime (CST or CDT)."""
+    dt = dt or get_local_now()
+    return dt.replace(tzinfo=LOCAL_TZ).tzname() or "CT"
 
 # ==========================================
 # DATABASE MODELS
@@ -184,16 +189,16 @@ class AttendanceLog(db.Model):
 
     @property
     def check_in_fmt(self):
-        """Formatted string for arrival time in Mountain Time."""
+        """Formatted string for arrival time in Central Time."""
         if self.check_in:
-            return self.check_in.strftime('%Y-%m-%d %I:%M %p MST')
+            return f"{self.check_in:%Y-%m-%d %I:%M %p} {local_tz_abbr(self.check_in)}"
         return "N/A"
 
     @property
     def check_out_fmt(self):
-        """Formatted string for departure time in Mountain Time."""
+        """Formatted string for departure time in Central Time."""
         if self.check_out:
-            return self.check_out.strftime('%Y-%m-%d %I:%M %p MST')
+            return f"{self.check_out:%Y-%m-%d %I:%M %p} {local_tz_abbr(self.check_out)}"
         return "Still Active"
 
 class SessionReminder(db.Model):
@@ -711,7 +716,7 @@ def dashboard():
         logs=logs,
         open_logs=open_logs,
         total_hours=round(total_hours, 2),
-        server_time_str=now_mountain.strftime('%Y-%m-%d %I:%M %p MST')
+        server_time_str=f"{now_mountain:%Y-%m-%d %I:%M %p} {local_tz_abbr(now_mountain)}"
     )
 
 @app.route('/attendance/checkout/<int:log_id>', methods=['POST'])
@@ -2199,7 +2204,7 @@ def _build_team_report_pdf(teams):
 
     story = [
         Paragraph("Team Hours Report", title_style),
-        Paragraph(f"Generated {get_local_now():%B %d, %Y at %I:%M %p} (Mountain Time)", meta_style),
+        Paragraph(f"Generated {get_local_now():%B %d, %Y at %I:%M %p} (Central Time)", meta_style),
     ]
 
     grand_total = 0.0
