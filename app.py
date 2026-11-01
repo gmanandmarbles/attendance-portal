@@ -2664,18 +2664,13 @@ def kiosk_scan():
 
                 db.session.commit()
 
-        if user.is_visitor:
-            who = open_log.visitor_name or user.name or "Visitor"
-            sign_out_message = f"Goodbye, {who}! You're signed out."
-        else:
-            who = user.name or user.email or barcode
-            sign_out_message = f"User ({barcode}) signed out!"
-
+        # The kiosk is a shared, public screen: never echo a name, email, or barcode
+        # back to it. Keep the confirmation deliberately generic.
+        sign_out_message = "You're signed out."
         notify_monitor('CHECK_OUT')
         return jsonify({
             "status": "success", 
             "action": "CHECK_OUT",
-            "user_name": who,
             "message": sign_out_message
         })
     else:
@@ -2776,23 +2771,21 @@ def kiosk_scan():
         db.session.add(new_log)
         db.session.commit()
 
-        message = f"User ({barcode}) signed in!"
+        # Keep the public kiosk response free of names, emails, and barcodes.
+        message = "You're signed in!"
         if created_session:
-            message = (f"Session \u201c{created_session.title}\u201d started "
-                       f"(until {created_session.end_time:%I:%M %p}). User ({barcode}) signed in!")
+            message = "Session started. You're signed in!"
         if in_buffer:
-            message = f"User ({barcode}) signed in early — {candidate_session.title} starts soon!"
+            message = "You're signed in early for the upcoming session."
         if user.is_visitor:
-            message = f"Welcome, {visitor_name}! You're signed in."
+            message = "You're signed in."
             if in_buffer:
-                message = f"Welcome, {visitor_name}! You're signed in early — {candidate_session.title} starts soon."
+                message = "You're signed in early for the upcoming session."
 
         notify_monitor('CHECK_IN')
-        check_in_name = visitor_name if user.is_visitor else (user.name or user.email or barcode)
         return jsonify({
             "status": "success", 
             "action": "CHECK_IN",
-            "user_name": check_in_name,
             "message": message
         })
 

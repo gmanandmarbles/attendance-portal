@@ -431,7 +431,7 @@
         <div class="confirmation-card">
             <div class="confirm-icon" id="confirmIcon">&#10003;</div>
             <h2 id="confirmTitle">Signed in</h2>
-            <p id="confirmName"></p>
+            <p id="confirmSubtitle">Your badge was recorded.</p>
         </div>
     </div>
 
@@ -496,7 +496,7 @@
         const confirmationOverlay = document.getElementById('confirmationOverlay');
         const confirmIcon = document.getElementById('confirmIcon');
         const confirmTitle = document.getElementById('confirmTitle');
-        const confirmName = document.getElementById('confirmName');
+        const confirmSubtitle = document.getElementById('confirmSubtitle');
 
         const NAME_PROMPT_TIMEOUT_MS = 45000;      // give up and return to scanning if nobody types
         const SESSION_PROMPT_TIMEOUT_MS = 90000;
@@ -585,11 +585,14 @@
         }
 
         // Big, unmissable confirmation so the person knows the scan registered.
-        function showConfirmation(action, name) {
+        // Deliberately generic: the kiosk must not echo names or other PII.
+        function showConfirmation(action) {
             const isCheckOut = action === 'CHECK_OUT';
             confirmIcon.textContent = isCheckOut ? '\u{1F44B}' : '\u2713';
             confirmTitle.textContent = isCheckOut ? 'Signed out' : 'Signed in';
-            confirmName.textContent = name || '';
+            confirmSubtitle.textContent = isCheckOut
+                ? 'Your badge was recorded. See you next time!'
+                : 'Your badge was recorded. You are all set!';
 
             confirmationOverlay.classList.remove('show', 'is-out');
             void confirmationOverlay.offsetWidth;  // restart the entry animation
@@ -750,7 +753,7 @@
                     if (pendingBarcode) closeNamePrompt();
                     if (pendingSessionBarcode) closeSessionPrompt();
                     showResult(true, data.message);
-                    showConfirmation(data.action, data.user_name);
+                    showConfirmation(data.action);
                 } else if (pendingSessionBarcode) {
                     // A problem with the session details: keep the form open so it can be fixed.
                     sessionError.textContent = data.message;
