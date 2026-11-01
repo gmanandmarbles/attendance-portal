@@ -115,7 +115,22 @@
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             gap: 1rem;
+            max-height: calc(100vh - 290px);
+            min-height: 130px;
+            overflow-y: auto;
+            align-content: start;
+            padding: 0.25rem 0.5rem 0.75rem 0.25rem;
+            scrollbar-gutter: stable;
         }
+
+        .student-grid::-webkit-scrollbar { width: 10px; }
+        .student-grid::-webkit-scrollbar-track { background: transparent; }
+        .student-grid::-webkit-scrollbar-thumb {
+            background: #b8c6d1;
+            border: 3px solid var(--canvas);
+            border-radius: 999px;
+        }
+        .student-grid { scrollbar-color: #b8c6d1 transparent; scrollbar-width: thin; }
 
         .student-card {
             display: flex;
@@ -127,6 +142,50 @@
             border-radius: 12px;
             background: var(--panel);
             box-shadow: 0 8px 20px rgba(23, 32, 51, 0.06);
+            position: relative;
+            will-change: transform, opacity;
+        }
+
+        .student-card.card-enter {
+            animation: card-pop 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.35) both;
+        }
+
+        .student-card.card-leave {
+            animation: card-explode 0.65s ease-in forwards;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        @keyframes card-pop {
+            0% { opacity: 0; transform: scale(0.55) translateY(24px); box-shadow: 0 0 0 0 rgba(15, 118, 110, 0.55); }
+            55% { opacity: 1; transform: scale(1.06) translateY(0); box-shadow: 0 0 0 14px rgba(15, 118, 110, 0); }
+            100% { opacity: 1; transform: scale(1) translateY(0); box-shadow: 0 8px 20px rgba(23, 32, 51, 0.06); }
+        }
+
+        @keyframes card-explode {
+            0% { opacity: 1; transform: scale(1) rotate(0); filter: brightness(1); }
+            25% { opacity: 1; transform: scale(1.08) rotate(-2deg); filter: brightness(1.75); }
+            60% { opacity: 0.65; transform: scale(1.18) rotate(3deg); filter: brightness(2); }
+            100% { opacity: 0; transform: scale(1.55) rotate(8deg); filter: blur(5px) brightness(2.4); }
+        }
+
+        .explosion-particle {
+            position: fixed;
+            width: 10px;
+            height: 10px;
+            border-radius: 3px;
+            pointer-events: none;
+            z-index: 9999;
+            animation: particle-fly 0.68s ease-out forwards;
+        }
+
+        @keyframes particle-fly {
+            0% { opacity: 1; transform: translate(0, 0) rotate(0) scale(1); }
+            100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.15); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .student-card.card-enter, .student-card.card-leave, .explosion-particle { animation: none; }
         }
 
         .avatar {
@@ -167,6 +226,8 @@
             font: 1rem Arial, sans-serif;
         }
 
+        .student-grid[hidden], .empty-state[hidden] { display: none !important; }
+
         @media (max-width: 650px) {
             .monitor-header, .status-bar { align-items: flex-start; flex-direction: column; }
             .header-actions { width: 100%; justify-content: space-between; }
@@ -181,27 +242,27 @@
                 <h1>Who's in the shop?</h1>
             </div>
             <div class="header-actions">
-                <span class="updated">Updated {{ now_mountain.strftime('%I:%M %p') }}</span>
+                <span class="updated" id="updatedAt">Updated {{ now_mountain.strftime('%I:%M %p') }}</span>
                 <button type="button" id="fullscreenButton">Enter Fullscreen</button>
             </div>
         </header>
 
         <section class="status-bar" aria-live="polite">
             <div class="session-status">
-                <span class="status-dot {% if current_session %}live{% endif %}"></span>
+                <span class="status-dot {% if current_session %}live{% endif %}" id="sessionDot"></span>
                 {% if current_session %}
-                <span>{{ current_session.title }} · {{ current_session.location }}</span>
+                <span id="sessionStatus">{{ current_session.title }} · {{ current_session.location }}</span>
                 {% else %}
-                <span>No build session is active</span>
+                <span id="sessionStatus">No build session is active</span>
                 {% endif %}
             </div>
-            <div class="count">{{ signed_in_logs|length }} signed in</div>
+            <div class="count" id="signedInCount">{{ signed_in_logs|length }} signed in</div>
         </section>
 
-        {% if signed_in_logs %}
-        <section class="student-grid" aria-label="People currently signed in">
+        <section class="student-grid" id="studentGrid" aria-label="People currently signed in"
+                 {% if not signed_in_logs %}hidden{% endif %}>
             {% for log in signed_in_logs %}
-            <article class="student-card {% if log.user.role in ['mentor', 'admin'] %}is-staff{% endif %}">
+            <article class="student-card {% if log.user.role in ['mentor', 'admin'] %}is-staff{% endif %}" data-log-id="{{ log.id }}">
                 <div class="avatar">
                     {% if log.user.photo_url %}
                     <img src="{{ url_for('get_photo', filename=log.user.photo_url.split('/')[-1]) }}" alt="">
@@ -220,9 +281,8 @@
             </article>
             {% endfor %}
         </section>
-        {% else %}
-        <div class="empty-state">No one is currently signed in.</div>
-        {% endif %}
+
+        <div class="empty-state" id="emptyState" {% if signed_in_logs %}hidden{% endif %}>No one is currently signed in.</div>
     </main>
 
     <script>
@@ -235,6 +295,208 @@
                 this.textContent = 'Enter Fullscreen';
             }
         });
+
+        (function () {
+            const grid = document.getElementById('studentGrid');
+            const emptyState = document.getElementById('emptyState');
+            const countEl = document.getElementById('signedInCount');
+            const statusEl = document.getElementById('sessionStatus');
+            const statusDot = document.getElementById('sessionDot');
+            const updatedEl = document.getElementById('updatedAt');
+
+            const dataUrl = "{{ url_for('mentor_monitor_data') }}";
+            const streamUrl = "{{ url_for('mentor_monitor_stream') }}";
+
+            let active = {{ 'true' if current_session else 'false' }};
+            let pollTimer = null;
+            let refreshing = false;
+            let queuedRefresh = false;
+
+            function buildCard(log) {
+                const card = document.createElement('article');
+                card.className = 'student-card' + (log.is_staff ? ' is-staff' : '');
+                card.dataset.logId = String(log.id);
+
+                const avatar = document.createElement('div');
+                avatar.className = 'avatar';
+                if (log.photo_url) {
+                    const photo = document.createElement('img');
+                    photo.src = log.photo_url;
+                    photo.alt = '';
+                    avatar.appendChild(photo);
+                } else {
+                    avatar.textContent = log.initial || '?';
+                }
+
+                const body = document.createElement('div');
+                const nameEl = document.createElement('h2');
+                nameEl.className = 'student-name';
+
+                if (log.team_logo_url) {
+                    const logo = document.createElement('img');
+                    logo.src = log.team_logo_url;
+                    logo.alt = (log.team_name || 'Team') + ' logo';
+                    logo.title = log.team_name || '';
+                    logo.className = 'team-logo';
+                    logo.loading = 'lazy';
+                    logo.style.height = '22px';
+                    logo.style.width = '22px';
+                    logo.style.objectFit = 'contain';
+                    logo.style.flex = '0 0 auto';
+                    nameEl.appendChild(logo);
+                }
+
+                const nameText = document.createElement('span');
+                nameText.textContent = log.name;
+                nameEl.appendChild(nameText);
+
+                if (log.is_staff || log.is_visitor) {
+                    const badge = document.createElement('span');
+                    badge.className = 'role-badge' + (log.is_visitor ? ' visitor' : '');
+                    badge.textContent = log.is_visitor ? 'visitor' : log.role;
+                    nameEl.appendChild(badge);
+                }
+
+                const meta = document.createElement('div');
+                meta.className = 'student-meta';
+                meta.appendChild(document.createTextNode('In since ' + log.check_in));
+                meta.appendChild(document.createElement('br'));
+                meta.appendChild(document.createTextNode(log.session || 'No active session'));
+
+                body.appendChild(nameEl);
+                body.appendChild(meta);
+                card.appendChild(avatar);
+                card.appendChild(body);
+                return card;
+            }
+
+            function explodeCard(card) {
+                if (card.dataset.leaving === '1') return;
+                card.dataset.leaving = '1';
+
+                const rect = card.getBoundingClientRect();
+                const colors = ['#0f766e', '#14b8a6', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6'];
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+
+                for (let i = 0; i < 18; i += 1) {
+                    const particle = document.createElement('span');
+                    particle.className = 'explosion-particle';
+                    particle.style.left = centerX + 'px';
+                    particle.style.top = centerY + 'px';
+                    particle.style.backgroundColor = colors[i % colors.length];
+                    particle.style.animationDelay = (Math.random() * 0.08) + 's';
+
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = 70 + Math.random() * 190;
+                    particle.style.setProperty('--dx', (Math.cos(angle) * distance) + 'px');
+                    particle.style.setProperty('--dy', (Math.sin(angle) * distance) + 'px');
+                    particle.style.setProperty('--rot', (Math.random() * 720 - 360) + 'deg');
+
+                    document.body.appendChild(particle);
+                    window.setTimeout(() => particle.remove(), 900);
+                }
+
+                card.classList.add('card-leave');
+                window.setTimeout(() => card.remove(), 700);
+            }
+
+            function renderLogs(logs) {
+                const existing = new Map(
+                    Array.from(grid.querySelectorAll('.student-card')).map(card => [card.dataset.logId, card])
+                );
+                const incoming = new Set();
+
+                logs.forEach((log, index) => {
+                    const id = String(log.id);
+                    incoming.add(id);
+                    if (existing.has(id)) return;
+
+                    const card = buildCard(log);
+                    card.style.animationDelay = Math.min(index * 35, 250) + 'ms';
+                    grid.appendChild(card);
+                    card.classList.add('card-enter');
+                    window.setTimeout(() => {
+                        card.classList.remove('card-enter');
+                        card.style.animationDelay = '';
+                    }, 950);
+                });
+
+                existing.forEach((card, id) => {
+                    if (!incoming.has(id)) explodeCard(card);
+                });
+
+                if (logs.length > 0) {
+                    grid.hidden = false;
+                    emptyState.hidden = true;
+                } else if (existing.size === 0) {
+                    grid.hidden = true;
+                    emptyState.hidden = false;
+                } else {
+                    // Keep the grid visible long enough for the last card's explosion.
+                    window.setTimeout(() => {
+                        if (!grid.querySelector('.student-card')) {
+                            grid.hidden = true;
+                            emptyState.hidden = false;
+                        }
+                    }, 760);
+                }
+            }
+
+            function updateStatus(data) {
+                countEl.textContent = data.logs.length + ' signed in';
+                statusDot.classList.toggle('live', !!data.active);
+                statusEl.textContent = data.current_session
+                    ? data.current_session.title + ' · ' + data.current_session.location
+                    : 'No build session is active';
+                updatedEl.textContent = 'Updated ' + data.updated_at;
+            }
+
+            function schedule() {
+                window.clearTimeout(pollTimer);
+                pollTimer = window.setTimeout(refresh, active ? 10000 : 60000);
+            }
+
+            function refresh() {
+                if (refreshing) {
+                    queuedRefresh = true;
+                    return;
+                }
+                refreshing = true;
+
+                fetch(dataUrl, { cache: 'no-store', headers: { Accept: 'application/json' } })
+                    .then(response => {
+                        if (!response.ok) throw new Error('Monitor refresh failed');
+                        return response.json();
+                    })
+                    .then(data => {
+                        active = !!data.active;
+                        renderLogs(data.logs);
+                        updateStatus(data);
+                        schedule();
+                    })
+                    .catch(() => schedule())
+                    .finally(() => {
+                        refreshing = false;
+                        if (queuedRefresh) {
+                            queuedRefresh = false;
+                            refresh();
+                        }
+                    });
+            }
+
+            if (window.EventSource) {
+                const events = new EventSource(streamUrl);
+                events.addEventListener('attendance', refresh);
+                window.addEventListener('pagehide', () => events.close(), { once: true });
+            }
+
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) refresh();
+            });
+
+            refresh();
+        })();
     </script>
 </body>
 </html>

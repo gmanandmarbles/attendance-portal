@@ -3,6 +3,7 @@ import re
 import csv
 import io
 import json
+import queue
 import smtplib
 import ssl
 import threading
@@ -1069,24 +1070,131 @@ def mentor_absences():
         absences=absences
     )
 
-@app.route('/mentor/monitor')
-@role_required('mentor', 'admin')
-def mentor_monitor():
-    now_mountain = get_local_now()
+# ==========================================
+# LIVE MONITOR
+# ==========================================
+# The monitor keeps a persistent server-sent-event connection open so a kiosk scan
+# can push an update instantly. The page also polls (10s while a session is live,
+# 60s otherwise) as a fallback in case the push connection drops.
+
+_monitor_subscribers = set()
+_monitor_subscribers_lock = threading.Lock()
+
+
+def _monitor_context():
+    now = get_local_now()
     current_session = BuildSession.query.filter(
-        BuildSession.start_time <= now_mountain,
-        BuildSession.end_time >= now_mountain
+        BuildSession.start_time <= now,
+        BuildSession.end_time >= now
     ).order_by(BuildSession.start_time.desc()).first()
     signed_in_logs = AttendanceLog.query.join(User).filter(
         AttendanceLog.check_out.is_(None),
         User.role.in_(['student', 'mentor', 'admin', 'visitor'])
     ).order_by(AttendanceLog.check_in.asc()).all()
+    return now, current_session, signed_in_logs
+
+
+def _monitor_log_data(log):
+    """JSON-friendly details for one signed-in card on the live monitor."""
+    user = log.user
+    photo_url = None
+    if user.photo_url:
+        photo_url = url_for('get_photo', filename=user.photo_url.split('/')[-1])
+
+    team_logo_url = None
+    if user.team and user.team.logo_filename:
+        team_logo_url = url_for(
+            'team_logo', team_id=user.team.id, v=user.team.logo_filename
+        )
+
+    return {
+        'id': log.id,
+        'name': log.display_name,
+        'initial': (log.display_name or '?')[:1].upper(),
+        'photo_url': photo_url,
+        'team_logo_url': team_logo_url,
+        'team_name': user.team.name if user.team else None,
+        'role': user.role,
+        'is_staff': user.role in ('mentor', 'admin'),
+        'is_visitor': user.role == 'visitor',
+        'check_in': f"{log.check_in:%I:%M %p}".lstrip('0'),
+        'session': log.session.title if log.session else 'No active session',
+    }
+
+
+def _monitor_snapshot(now, current_session, signed_in_logs):
+    return {
+        'active': current_session is not None,
+        'current_session': {
+            'title': current_session.title,
+            'location': current_session.location,
+        } if current_session else None,
+        'updated_at': f"{now:%I:%M:%S %p}".lstrip('0'),
+        'logs': [_monitor_log_data(log) for log in signed_in_logs],
+    }
+
+
+def notify_monitor(action=None):
+    """Push a live-monitor refresh to every open monitor page."""
+    payload = json.dumps({'action': action, 'at': get_local_now().isoformat()})
+    with _monitor_subscribers_lock:
+        subscribers = list(_monitor_subscribers)
+    for subscriber in subscribers:
+        try:
+            subscriber.put_nowait(payload)
+        except queue.Full:
+            # A stalled/browser-backgrounded tab: the next poll will catch it up.
+            pass
+
+
+@app.route('/mentor/monitor')
+@role_required('mentor', 'admin')
+def mentor_monitor():
+    now_mountain, current_session, signed_in_logs = _monitor_context()
 
     return render_template(
         'mentor_monitor.html',
         current_session=current_session,
         signed_in_logs=signed_in_logs,
         now_mountain=now_mountain
+    )
+
+
+@app.route('/mentor/monitor/data')
+@role_required('mentor', 'admin')
+def mentor_monitor_data():
+    """Live snapshot of who is signed in, used by the monitor's auto-refresh."""
+    return jsonify(_monitor_snapshot(*_monitor_context()))
+
+
+@app.route('/mentor/monitor/stream')
+@role_required('mentor', 'admin')
+def mentor_monitor_stream():
+    """Server-sent events so the monitor updates the instant someone scans."""
+    def event_stream():
+        subscriber = queue.Queue(maxsize=20)
+        with _monitor_subscribers_lock:
+            _monitor_subscribers.add(subscriber)
+        try:
+            yield "retry: 5000\n\n"
+            while True:
+                try:
+                    payload = subscriber.get(timeout=15)
+                    yield f"event: attendance\ndata: {payload}\n\n"
+                except queue.Empty:
+                    yield ": keep-alive\n\n"
+        finally:
+            with _monitor_subscribers_lock:
+                _monitor_subscribers.discard(subscriber)
+
+    return Response(
+        event_stream(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive',
+        },
     )
 
 @app.route('/mentor/students')
@@ -2560,11 +2668,14 @@ def kiosk_scan():
             who = open_log.visitor_name or user.name or "Visitor"
             sign_out_message = f"Goodbye, {who}! You're signed out."
         else:
+            who = user.name or user.email or barcode
             sign_out_message = f"User ({barcode}) signed out!"
 
+        notify_monitor('CHECK_OUT')
         return jsonify({
             "status": "success", 
             "action": "CHECK_OUT",
+            "user_name": who,
             "message": sign_out_message
         })
     else:
@@ -2676,9 +2787,12 @@ def kiosk_scan():
             if in_buffer:
                 message = f"Welcome, {visitor_name}! You're signed in early — {candidate_session.title} starts soon."
 
+        notify_monitor('CHECK_IN')
+        check_in_name = visitor_name if user.is_visitor else (user.name or user.email or barcode)
         return jsonify({
             "status": "success", 
             "action": "CHECK_IN",
+            "user_name": check_in_name,
             "message": message
         })
 
