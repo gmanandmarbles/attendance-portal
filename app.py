@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
+from html import escape as html_escape
 from zoneinfo import ZoneInfo
 from functools import wraps, lru_cache
 from xml.sax.saxutils import escape as xml_escape
@@ -275,12 +276,89 @@ def _open_smtp():
     return server
 
 
-def _make_message(to_email, subject, body):
+BRAND_COLOR = "#4f46e5"
+BRAND_COLOR_DARK = "#4338ca"
+
+
+def _email_html(title, body_html, cta_label=None, cta_url=None, footer=None):
+    """Wrap email content in a clean, responsive, email-client-safe HTML shell."""
+    cta = ""
+    if cta_label and cta_url:
+        cta = (
+            '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0 4px;">'
+            '<tr><td style="border-radius:10px;background-color:%s;">'
+            '<a href="%s" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:600;'
+            'color:#ffffff;text-decoration:none;border-radius:10px;">%s</a>'
+            '</td></tr></table>'
+            % (BRAND_COLOR, html_escape(cta_url, quote=True), html_escape(cta_label))
+        )
+
+    if footer is None:
+        footer = "You are receiving this email because you have an account on the attendance portal."
+
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#eef2ff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f2937;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#eef2ff;padding:32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 8px 24px rgba(30,27,75,0.12);">
+          <tr>
+            <td style="background-color:{brand};background-image:linear-gradient(135deg,{brand},{brand_dark});padding:28px 32px;">
+              <div style="font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:#c7d2fe;font-weight:700;">Attendance Portal</div>
+              <h1 style="margin:8px 0 0;font-size:24px;line-height:1.3;color:#ffffff;font-weight:700;">{title}</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 32px 8px;font-size:16px;line-height:1.6;color:#1f2937;">
+              {body}
+              {cta}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 32px 28px;">
+              <div style="border-top:1px solid #e2e8f0;padding-top:16px;font-size:12px;line-height:1.5;color:#64748b;">
+                {footer}
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>""".format(
+        title=html_escape(title),
+        brand=BRAND_COLOR,
+        brand_dark=BRAND_COLOR_DARK,
+        body=body_html,
+        cta=cta,
+        footer=html_escape(footer),
+    )
+
+
+def _plain_text_as_html(body):
+    """Turn a plain-text email body into simple HTML paragraphs."""
+    paragraphs = [p.strip() for p in (body or "").split("\n\n") if p.strip()]
+    html = "".join(
+        '<p style="margin:0 0 16px;">%s</p>' % html_escape(p).replace("\n", "<br>")
+        for p in paragraphs
+    )
+    return _email_html("Attendance Portal", html)
+
+
+def _make_message(to_email, subject, body, html_body=None):
     msg = EmailMessage()
     msg["From"] = formataddr((SMTP_FROM_NAME, SMTP_FROM_EMAIL)) if SMTP_FROM_NAME else SMTP_FROM_EMAIL
     msg["To"] = to_email
     msg["Subject"] = subject
     msg.set_content(body)
+    msg.add_alternative(html_body or _plain_text_as_html(body), subtype="html")
     return msg
 
 
@@ -360,6 +438,40 @@ def _reminder_body(mentor_name, build_session, absentees):
     )
 
 
+def _reminder_html(mentor_name, build_session, absentees):
+    """HTML version of the absence reminder email."""
+    s_start = to_local_naive(build_session.start_time)
+    s_end = to_local_naive(build_session.end_time)
+    when = f"{_fmt_date(s_start)} from {_fmt_time(s_start)} to {_fmt_time(s_end)}"
+
+    if not absentees:
+        lead = f"Nobody has reported an absence for the session on {when}."
+        detail = ""
+    elif len(absentees) == 1:
+        lead = f"For the session on {when}, one person reported they will be absent:"
+        detail = (
+            '<ul style="margin:0 0 16px;padding-left:22px;">'
+            f'<li style="margin:0 0 8px;">{html_escape(absentees[0])}</li></ul>'
+        )
+    else:
+        lead = f"For the session on {when}, the following people reported they will be absent:"
+        items = "".join(
+            f'<li style="margin:0 0 8px;">{html_escape(a)}</li>' for a in absentees
+        )
+        detail = f'<ul style="margin:0 0 16px;padding-left:22px;">{items}</ul>'
+
+    body = (
+        f'<p style="margin:0 0 16px;">Hey {html_escape(mentor_name)},</p>'
+        f'<p style="margin:0 0 16px;">{html_escape(lead)}</p>'
+        f"{detail}"
+    )
+    return _email_html(
+        "Absence update",
+        body,
+        footer=f"Session: {build_session.title} · {build_session.location or ''}",
+    )
+
+
 def _invite_body(student_name, student_email):
     return (
         f"Hey {student_name},\n\n"
@@ -368,6 +480,27 @@ def _invite_body(student_name, student_email):
         f"Sign in with the Google account for {student_email} here:\n"
         f"{APP_URL}\n\n"
         f"Absences need to be reported at least {ABSENCE_CUTOFF_HOURS} hours before a session starts.\n"
+    )
+
+
+def _invite_html(student_name, student_email):
+    """HTML version of the portal invitation email."""
+    body = (
+        f'<p style="margin:0 0 16px;">Hey {html_escape(student_name)},</p>'
+        '<p style="margin:0 0 16px;">We now have an attendance system for build sessions. '
+        'Use it to see the schedule, report absences ahead of time, and keep track of your hours.</p>'
+        '<p style="margin:0 0 4px;">Sign in with the Google account for '
+        f'<strong>{html_escape(student_email)}</strong>:</p>'
+    )
+    return _email_html(
+        "You're invited to the Attendance Portal",
+        body,
+        cta_label="Open the portal",
+        cta_url=APP_URL,
+        footer=(
+            f"Absences need to be reported at least {ABSENCE_CUTOFF_HOURS} hours "
+            "before a session starts."
+        ),
     )
 
 
@@ -408,7 +541,8 @@ def process_session_reminders():
             if not mentor.email:
                 continue
             body = _reminder_body(mentor.name or mentor.email, build_session, absentees)
-            messages.append(_make_message(mentor.email, subject, body))
+            html_body = _reminder_html(mentor.name or mentor.email, build_session, absentees)
+            messages.append(_make_message(mentor.email, subject, body, html_body=html_body))
 
         try:
             sent = send_emails(messages)
@@ -733,7 +867,12 @@ def mentor_invite_students():
     students = User.query.filter_by(role='student').all()
     subject = "Attendance system for build sessions"
     messages = [
-        _make_message(u.email, subject, _invite_body(u.name or u.email, u.email))
+        _make_message(
+            u.email,
+            subject,
+            _invite_body(u.name or u.email, u.email),
+            html_body=_invite_html(u.name or u.email, u.email),
+        )
         for u in students if u.email
     ]
 
@@ -753,6 +892,46 @@ def mentor_invite_students():
     else:
         flash(f"Invitation sent to {sent} of {len(messages)} students. Check the server log for the failures.", "warning")
     return redirect(url_for('mentor_sessions'))
+
+@app.route('/admin/invite-all', methods=['POST'])
+@role_required('admin')
+def admin_invite_all_users():
+    """Email every provisioned user a link to the portal and a short explanation of what it's for."""
+    if not smtp_configured():
+        flash("Email isn't set up yet. Add the SMTP settings to .env first.", "danger")
+        return redirect(url_for('dashboard'))
+
+    users = [
+        u for u in User.query.filter(User.role != 'visitor').all()
+        if u.email and not u.email.endswith('.invalid')
+    ]
+    subject = "Attendance system for build sessions"
+    messages = [
+        _make_message(
+            u.email,
+            subject,
+            _invite_body(u.name or u.email, u.email),
+            html_body=_invite_html(u.name or u.email, u.email),
+        )
+        for u in users
+    ]
+
+    if not messages:
+        flash("There are no users to invite yet.", "warning")
+        return redirect(url_for('dashboard'))
+
+    try:
+        sent = send_emails(messages)
+    except Exception:
+        app.logger.exception("Could not connect to SMTP server to send invitations")
+        flash("Couldn't connect to the email server. Check the SMTP settings in .env.", "danger")
+        return redirect(url_for('dashboard'))
+
+    if sent == len(messages):
+        flash(f"Invitation sent to {sent} user{'s' if sent != 1 else ''}.", "success")
+    else:
+        flash(f"Invitation sent to {sent} of {len(messages)} users. Check the server log for the failures.", "warning")
+    return redirect(url_for('dashboard'))
 
 # Accepted formats for start_time / end_time columns in an imported CSV.
 _SESSION_DT_FORMATS = [
@@ -1227,7 +1406,6 @@ def admin_user_new():
             return redirect(url_for('admin_user_new'))
 
     return render_template('admin_user_new.html', teams=teams, form=form, roles=QUICK_ADD_ROLES)
-
 
 @app.route('/admin/logs')
 @role_required('admin')
