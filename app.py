@@ -477,34 +477,38 @@ def _reminder_html(mentor_name, build_session, absentees):
     )
 
 
-def _invite_body(student_name, student_email):
+def _invite_body(student_name, student_email, invited_by="An administrator"):
     return (
         f"Hey {student_name},\n\n"
-        f"We now have an attendance system for build sessions. You can use it to report "
-        f"when you'll be absent from a session.\n\n"
-        f"Sign in with the Google account for {student_email} here:\n"
+        f"{invited_by} has invited you to the attendance portal for build sessions. You can use it "
+        f"to see the schedule, report absences ahead of time, and keep track of your hours.\n\n"
+        f"To sign in, open:\n"
         f"{APP_URL}\n\n"
+        f"Use the Google account for {student_email}. If that isn't the Google account you normally "
+        f"use, ask an admin to update your email address on the portal.\n\n"
         f"Absences need to be reported at least {ABSENCE_CUTOFF_HOURS} hours before a session starts.\n"
     )
 
 
-def _invite_html(student_name, student_email):
+def _invite_html(student_name, student_email, invited_by="An administrator"):
     """HTML version of the portal invitation email."""
     body = (
         f'<p style="margin:0 0 16px;">Hey {html_escape(student_name)},</p>'
-        '<p style="margin:0 0 16px;">We now have an attendance system for build sessions. '
-        'Use it to see the schedule, report absences ahead of time, and keep track of your hours.</p>'
-        '<p style="margin:0 0 4px;">Sign in with the Google account for '
+        f'<p style="margin:0 0 16px;"><strong>{html_escape(invited_by)}</strong> has invited you to '
+        'the attendance portal for build sessions. You can use it to see the schedule, report '
+        'absences ahead of time, and keep track of your hours.</p>'
+        '<p style="margin:0 0 4px;">To sign in, open the portal and use the Google account for '
         f'<strong>{html_escape(student_email)}</strong>:</p>'
     )
     return _email_html(
         "You're invited to the Attendance Portal",
         body,
-        cta_label="Open the portal",
+        cta_label="Sign in to the portal",
         cta_url=APP_URL,
         footer=(
             f"Absences need to be reported at least {ABSENCE_CUTOFF_HOURS} hours "
-            "before a session starts."
+            "before a session starts. If that isn't the Google account you normally use, "
+            "ask an admin to update your email address on the portal."
         ),
     )
 
@@ -870,13 +874,13 @@ def mentor_invite_students():
         return redirect(url_for('mentor_sessions'))
 
     students = User.query.filter_by(role='student').all()
-    subject = "Attendance system for build sessions"
+    subject = "You've been invited to the attendance portal"
     messages = [
         _make_message(
             u.email,
             subject,
-            _invite_body(u.name or u.email, u.email),
-            html_body=_invite_html(u.name or u.email, u.email),
+            _invite_body(u.name or u.email, u.email, invited_by="Your mentor"),
+            html_body=_invite_html(u.name or u.email, u.email, invited_by="Your mentor"),
         )
         for u in students if u.email
     ]
@@ -910,13 +914,13 @@ def admin_invite_all_users():
         u for u in User.query.filter(User.role != 'visitor').all()
         if u.email and not u.email.endswith('.invalid')
     ]
-    subject = "Attendance system for build sessions"
+    subject = "You've been invited to the attendance portal"
     messages = [
         _make_message(
             u.email,
             subject,
-            _invite_body(u.name or u.email, u.email),
-            html_body=_invite_html(u.name or u.email, u.email),
+            _invite_body(u.name or u.email, u.email, invited_by="An administrator"),
+            html_body=_invite_html(u.name or u.email, u.email, invited_by="An administrator"),
         )
         for u in users
     ]
