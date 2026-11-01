@@ -3,6 +3,7 @@
 {% block title %}Absence Overview{% endblock %}
 
 {% block content %}
+{% from "_team.html" import team_logo %}
 <h2 class="mb-4 fw-bold">📋 Student Absence Tracker</h2>
 
 <div class="row">
@@ -62,7 +63,9 @@
                                              class="rounded-circle me-2" style="width: 32px; height: 32px; object-fit: cover;">
                                         {% endif %}
                                         <div>
-                                            <strong>{{ a.user.name or a.user.email }}</strong><br>
+                                            <strong class="d-inline-flex align-items-center gap-2">
+                                                {{ team_logo(a.user, 18) }}{{ a.user.name or a.user.email }}
+                                            </strong><br>
                                             <small class="text-muted">{{ a.user.email }}</small>
                                         </div>
                                     </div>

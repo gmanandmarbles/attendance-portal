@@ -3,7 +3,7 @@
 {% block title %}Student Inspection{% endblock %}
 
 {% block content %}
-{% from "_team.html" import team_name, team_badge %}
+{% from "_team.html" import team_name, team_badge, team_logo %}
 <h3 class="mb-4">Student Attendance & Hours Inspection</h3>
 
 <div class="row">
@@ -20,7 +20,9 @@
                 {% endif %}
                 <div class="flex-grow-1">
                     <div class="d-flex w-100 justify-content-between">
-                        <h6 class="mb-0">{{ team_name(u, active=(selected_user and selected_user.id == u.id)) }}</h6>
+                        <h6 class="mb-0 d-flex align-items-center gap-2">
+                            {{ team_logo(u, 20) }}{{ team_name(u, active=(selected_user and selected_user.id == u.id)) }}
+                        </h6>
                         <span class="d-flex gap-1 flex-shrink-0 ms-1">
                             {{ team_badge(u) }}
                             <small class="badge bg-dark text-capitalize">{{ u.role }}</small>
@@ -42,7 +44,10 @@
                 <img src="/{{ selected_user.photo_url }}" class="avatar-md me-3" style="width: 80px; height: 80px;" alt="Photo">
                 {% endif %}
                 <div>
-                    <h3 class="mb-1">{{ team_name(selected_user) }} <span class="fs-6 align-middle">{{ team_badge(selected_user) }}</span></h3>
+                    <h3 class="mb-1 d-flex align-items-center gap-2 flex-wrap">
+                        {{ team_logo(selected_user, 32) }}{{ team_name(selected_user) }}
+                        <span class="fs-6 align-middle">{{ team_badge(selected_user) }}</span>
+                    </h3>
                     {% if selected_user.role == 'visitor' %}
                     <p class="mb-1 text-muted">Visitor badge (no web access) | Barcode: <code>{{ selected_user.barcode or 'None' }}</code></p>
                     {% else %}

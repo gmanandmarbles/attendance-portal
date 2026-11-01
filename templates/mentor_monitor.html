@@ -1,3 +1,4 @@
+{% from "_team.html" import team_logo %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -210,7 +211,7 @@
                 </div>
                 <div>
                     <h2 class="student-name">
-                        {{ log.display_name }}
+                        {{ team_logo(log.user, 22) }}{{ log.display_name }}
                         {% if log.user.role in ['mentor', 'admin'] %}<span class="role-badge">{{ log.user.role }}</span>{% endif %}
                         {% if log.user.role == 'visitor' %}<span class="role-badge visitor">visitor</span>{% endif %}
                     </h2>
