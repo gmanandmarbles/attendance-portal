@@ -571,8 +571,39 @@
         }
 
         .avatar img { width: 100%; height: 100%; object-fit: cover; }
-        .student-card.is-staff { border-color: var(--accent); background: linear-gradient(0deg, var(--accent-soft) 0%, var(--panel) 55%); }
-        .student-card.is-staff .avatar { background: var(--accent); color: white; }
+        /* Team-coloured cards: the team colour becomes the card background. Mentor/admin
+           cards are always black with white text so they stand out instantly. */
+        .student-card.has-team,
+        .student-card.is-staff {
+            color: #ffffff;
+            border-color: rgba(255, 255, 255, 0.18);
+            box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+        }
+
+        .student-card.has-team .avatar,
+        .student-card.is-staff .avatar {
+            background: rgba(255, 255, 255, 0.22);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+        }
+
+        .student-card.has-team .student-meta,
+        .student-card.is-staff .student-meta {
+            color: rgba(255, 255, 255, 0.86);
+        }
+
+        .student-card.has-team .role-badge,
+        .student-card.is-staff .role-badge {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.35);
+        }
+
+        .student-card.is-staff {
+            background: #000000 !important;
+            border-color: #000000;
+        }
+
         .student-name { margin: 0; font-size: 1.35rem; line-height: 1.1; display: flex; align-items: center; gap: 0.5rem; }
         .role-badge {
             font: 700 0.65rem Arial, sans-serif;
@@ -631,7 +662,8 @@
         <section class="student-grid" id="studentGrid" aria-label="People currently signed in"
                  {% if not signed_in_logs %}hidden{% endif %}>
             {% for log in signed_in_logs %}
-            <article class="student-card {% if log.user.role in ['mentor', 'admin'] %}is-staff{% endif %}" data-log-id="{{ log.id }}" data-log-name="{{ log.display_name }}">
+            <article class="student-card {% if log.user.role in ['mentor', 'admin'] %}is-staff{% elif log.user.team and log.user.team.color %}has-team{% endif %}" data-log-id="{{ log.id }}" data-log-name="{{ log.display_name }}"
+                     {% if log.user.role in ['mentor', 'admin'] %}style="background:#000000;color:#ffffff;"{% elif log.user.team and log.user.team.color %}style="background:{{ log.user.team.color }};color:#ffffff;"{% endif %}>
                 <div class="avatar">
                     {% if log.user.photo_url %}
                     <img src="{{ url_for('get_photo', filename=log.user.photo_url.split('/')[-1]) }}" alt="">
@@ -1185,11 +1217,35 @@
                 schedule();
             }
 
+            function applyCardTheme(card, log) {
+                if (!card || !log) return;
+                card.classList.toggle('is-staff', !!log.is_staff);
+                card.classList.toggle('has-team', !log.is_staff && !!log.team_color);
+                if (log.is_staff) {
+                    card.style.background = '#000000';
+                    card.style.color = '#ffffff';
+                } else if (log.team_color) {
+                    card.style.background = log.team_color;
+                    card.style.color = '#ffffff';
+                } else {
+                    card.style.background = '';
+                    card.style.color = '';
+                }
+            }
+
             function buildCard(log) {
                 const card = document.createElement('article');
-                card.className = 'student-card' + (log.is_staff ? ' is-staff' : '');
+                card.className = 'student-card' + (log.is_staff ? ' is-staff' : (log.team_color ? ' has-team' : ''));
                 card.dataset.logId = String(log.id);
                 card.dataset.logName = log.name;
+
+                if (log.is_staff) {
+                    card.style.background = '#000000';
+                    card.style.color = '#ffffff';
+                } else if (log.team_color) {
+                    card.style.background = log.team_color;
+                    card.style.color = '#ffffff';
+                }
 
                 const avatar = document.createElement('div');
                 avatar.className = 'avatar';
@@ -1369,7 +1425,10 @@
                 logs.forEach((log, index) => {
                     const id = String(log.id);
                     incoming.add(id);
-                    if (existing.has(id)) return;
+                    if (existing.has(id)) {
+                        applyCardTheme(existing.get(id), log);
+                        return;
+                    }
 
                     const card = buildCard(log);
                     card.style.animationDelay = Math.min(index * 35, 250) + 'ms';

@@ -1166,6 +1166,7 @@ def _monitor_log_data(log):
         'photo_url': photo_url,
         'team_logo_url': team_logo_url,
         'team_name': user.team.name if user.team else None,
+        'team_color': user.team.color if user.team else None,
         'role': user.role,
         'is_staff': user.role in ('mentor', 'admin'),
         'is_visitor': user.role == 'visitor',
