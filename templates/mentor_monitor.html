@@ -286,6 +286,258 @@
             75% { transform: translate(-4px, 3px) rotate(-0.15deg); }
         }
 
+        /* ======================================
+           LAST-MENTOR SELF-DESTRUCT SEQUENCE
+           ====================================== */
+        .self-destruct-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10010;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            background:
+                repeating-linear-gradient(45deg, rgba(127, 29, 29, 0.2) 0 22px, rgba(0, 0, 0, 0.42) 22px 44px),
+                radial-gradient(circle at center, #450a0a 0%, #0c0a09 58%, #000 100%);
+            color: #fee2e2;
+            transition: opacity 0.5s ease;
+        }
+
+        .self-destruct-overlay::before {
+            content: '';
+            position: absolute;
+            inset: -20%;
+            background: radial-gradient(circle at center, rgba(239, 68, 68, 0.28), transparent 58%);
+            animation: sd-pulse 0.9s ease-in-out infinite alternate;
+        }
+
+        .self-destruct-overlay.fade-out { opacity: 0; }
+        .self-destruct-overlay[hidden],
+        .idle-screen[hidden],
+        .sound-hint[hidden],
+        .sd-main[hidden],
+        .sd-session-over[hidden],
+        .sd-voice[hidden] { display: none !important; }
+
+        .sd-main {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        .sd-warning {
+            color: #fca5a5;
+            font: 900 clamp(0.8rem, 1.8vw, 1.3rem)/1.1 Arial, sans-serif;
+            letter-spacing: 0.24em;
+            text-transform: uppercase;
+            animation: sd-blink 0.6s steps(2, end) infinite;
+        }
+
+        .sd-title {
+            margin-top: 1rem;
+            color: #fee2e2;
+            font: 900 clamp(1.8rem, 4.8vw, 4.5rem)/1 Arial, sans-serif;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            text-shadow: 0 0 28px rgba(239, 68, 68, 0.9);
+        }
+
+        .sd-count {
+            margin: 0.1em 0 0;
+            color: #fecaca;
+            font: 900 clamp(10rem, 38vw, 32rem)/0.78 Arial, sans-serif;
+            letter-spacing: -0.04em;
+            text-shadow:
+                0 0 22px rgba(255, 255, 255, 0.45),
+                0 0 70px rgba(239, 68, 68, 0.95),
+                0 0 160px rgba(185, 28, 28, 0.9);
+            will-change: transform, opacity;
+        }
+
+        .sd-subtitle {
+            margin-top: 1.25rem;
+            color: #fca5a5;
+            font: 800 clamp(0.9rem, 2.2vw, 1.5rem)/1.2 Arial, sans-serif;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+        }
+
+        .sd-voice {
+            position: relative;
+            z-index: 1;
+            color: #f8fafc;
+            font: 900 clamp(3rem, 13vw, 11rem)/0.95 Arial, sans-serif;
+            letter-spacing: 0.04em;
+            text-align: center;
+            text-transform: uppercase;
+            text-shadow: 0 0 30px #ef4444, 0 0 100px rgba(239, 68, 68, 0.9);
+            animation: sd-voice-in 0.7s cubic-bezier(0.15, 1.2, 0.3, 1) both;
+        }
+
+        .sd-session-over {
+            position: relative;
+            z-index: 1;
+            color: #ffffff;
+            font: 900 clamp(3.4rem, 14vw, 13rem)/0.9 Arial, sans-serif;
+            letter-spacing: 0.02em;
+            text-align: center;
+            text-transform: uppercase;
+            text-shadow: 0 0 24px #fca5a5, 0 0 90px #ef4444;
+            animation: session-over-in 0.7s cubic-bezier(0.15, 1.1, 0.3, 1) both;
+        }
+
+        .sd-session-over span {
+            display: block;
+            color: #fca5a5;
+            font-size: 0.44em;
+            letter-spacing: 0.14em;
+            margin-top: 0.35em;
+        }
+
+        @keyframes sd-pulse {
+            from { opacity: 0.45; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1.15); }
+        }
+
+        @keyframes sd-blink {
+            0%, 45% { opacity: 1; }
+            46%, 100% { opacity: 0.25; }
+        }
+
+        @keyframes sd-voice-in {
+            0% { opacity: 0; transform: scale(0.5); filter: blur(8px); }
+            65% { opacity: 1; transform: scale(1.04); filter: blur(0); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        @keyframes session-over-in {
+            0% { opacity: 0; transform: scale(0.35) rotate(-4deg); filter: blur(15px); }
+            60% { opacity: 1; transform: scale(1.08) rotate(1deg); filter: blur(0); }
+            100% { opacity: 1; transform: scale(1) rotate(0); }
+        }
+
+        .explosion-flash {
+            position: fixed;
+            inset: 0;
+            z-index: 10020;
+            pointer-events: none;
+            opacity: 0;
+            background: radial-gradient(circle at center,
+                #ffffff 0%, #fef3c7 12%, #fbbf24 25%, #f97316 40%, #7f1d1d 60%, rgba(0, 0, 0, 0) 78%);
+        }
+
+        .explosion-flash.go { animation: explosion-flash 1.45s ease-out forwards; }
+
+        @keyframes explosion-flash {
+            0% { opacity: 0; transform: scale(0.15); }
+            7% { opacity: 1; transform: scale(1.05); }
+            22% { opacity: 1; transform: scale(1); }
+            100% { opacity: 0; transform: scale(1.9); }
+        }
+
+        .blast-particle {
+            position: fixed;
+            z-index: 10025;
+            pointer-events: none;
+            border-radius: 2px;
+            box-shadow: 0 0 18px rgba(251, 191, 36, 0.75);
+            animation: blast-fly var(--duration, 0.9s) cubic-bezier(0.1, 0.7, 0.2, 1) forwards;
+        }
+
+        @keyframes blast-fly {
+            0% { opacity: 1; transform: translate(0, 0) rotate(0) scale(1); }
+            100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.08); }
+        }
+
+        body.explosion-shake { animation: explosion-shake 0.85s linear; }
+
+        @keyframes explosion-shake {
+            0%, 100% { transform: translate(0, 0) rotate(0); }
+            10% { transform: translate(-30px, 18px) rotate(-1deg); }
+            22% { transform: translate(34px, -22px) rotate(1.2deg); }
+            36% { transform: translate(-25px, -16px) rotate(-0.9deg); }
+            50% { transform: translate(20px, 18px) rotate(0.7deg); }
+            65% { transform: translate(-14px, -10px) rotate(-0.5deg); }
+            80% { transform: translate(9px, 7px) rotate(0.3deg); }
+        }
+
+        /* ======================================
+           BETWEEN-SESSIONS STANDBY SCREEN
+           ====================================== */
+        .idle-screen {
+            position: fixed;
+            inset: 0;
+            z-index: 10005;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            background: #000;
+            transition: opacity 0.8s ease;
+        }
+
+        .idle-screen.fade-out { opacity: 0; }
+
+        .idle-logo-wrap {
+            display: grid;
+            place-items: center;
+            width: min(42vw, 34rem);
+            height: min(42vw, 34rem);
+            animation: idle-drift 13s ease-in-out infinite alternate;
+            will-change: transform;
+        }
+
+        .idle-logo {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            filter: drop-shadow(0 0 45px rgba(20, 184, 166, 0.42));
+            animation: idle-breathe 3.8s ease-in-out infinite alternate;
+        }
+
+        .idle-fallback {
+            color: #14b8a6;
+            font: 900 clamp(3rem, 10vw, 9rem)/1 Arial, sans-serif;
+            letter-spacing: 0.06em;
+            text-align: center;
+            text-shadow: 0 0 45px rgba(20, 184, 166, 0.55);
+        }
+
+        @keyframes idle-drift {
+            0% { transform: translate(-28vw, -19vh) rotate(-10deg) scale(0.82); }
+            24% { transform: translate(16vw, -21vh) rotate(7deg) scale(1.02); }
+            48% { transform: translate(25vw, 17vh) rotate(-6deg) scale(0.9); }
+            72% { transform: translate(-19vw, 22vh) rotate(9deg) scale(1.08); }
+            100% { transform: translate(-30vw, -8vh) rotate(-4deg) scale(0.88); }
+        }
+
+        @keyframes idle-breathe {
+            from { opacity: 0.72; transform: scale(0.96); }
+            to { opacity: 1; transform: scale(1.04); }
+        }
+
+        .sound-hint {
+            position: fixed;
+            right: 1.25rem;
+            bottom: 1.25rem;
+            z-index: 10050;
+            padding: 0.65rem 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.85);
+            color: #f8fafc;
+            font: 700 0.85rem Arial, sans-serif;
+            pointer-events: none;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+        }
+
         @media (prefers-reduced-motion: reduce) {
             .student-card.card-enter,
             .student-card.card-leave,
@@ -293,7 +545,16 @@
             .explosion-particle,
             .monitor-toast,
             .monitor-flash,
-            body.screen-shake { animation: none !important; }
+            .self-destruct-overlay::before,
+            .sd-warning,
+            .sd-voice,
+            .sd-session-over,
+            .explosion-flash,
+            .blast-particle,
+            .idle-logo-wrap,
+            .idle-logo,
+            body.screen-shake,
+            body.explosion-shake { animation: none !important; }
         }
 
         .avatar {
@@ -396,6 +657,30 @@
     <div class="monitor-toasts" id="monitorToasts" aria-live="assertive"></div>
     <div class="monitor-flash" id="monitorFlash"></div>
 
+    <div class="self-destruct-overlay" id="selfDestructOverlay" hidden>
+        <div class="sd-main" id="sdMain">
+            <div class="sd-warning">&#9888; Critical Alert &middot; Session Shutdown &#9888;</div>
+            <div class="sd-title">Self-Destruct Initiated</div>
+            <div class="sd-count" id="sdCount">10</div>
+            <div class="sd-subtitle">Last Mentor Has Left</div>
+        </div>
+        <div class="sd-voice" id="sdVoice" hidden>Session Over</div>
+        <div class="sd-session-over" id="sdSessionOver" hidden>
+            No One<br>Signed In
+        </div>
+    </div>
+
+    <div class="explosion-flash" id="explosionFlash"></div>
+
+    <div class="idle-screen" id="idleScreen" hidden>
+        <div class="idle-logo-wrap" id="idleLogoWrap">
+            <img class="idle-logo" id="idleLogo" alt="">
+            <div class="idle-fallback" id="idleFallback">ROBOTICS</div>
+        </div>
+    </div>
+
+    <div class="sound-hint" id="soundHint" hidden>&#128266; Click anywhere to enable sound</div>
+
     <script>
         document.getElementById('fullscreenButton').addEventListener('click', function () {
             if (!document.fullscreenElement) {
@@ -416,6 +701,17 @@
             const updatedEl = document.getElementById('updatedAt');
             const toastsEl = document.getElementById('monitorToasts');
             const flashEl = document.getElementById('monitorFlash');
+            const selfDestructOverlay = document.getElementById('selfDestructOverlay');
+            const sdMain = document.getElementById('sdMain');
+            const sdCount = document.getElementById('sdCount');
+            const sdVoice = document.getElementById('sdVoice');
+            const sdSessionOver = document.getElementById('sdSessionOver');
+            const explosionFlash = document.getElementById('explosionFlash');
+            const idleScreen = document.getElementById('idleScreen');
+            const idleLogoWrap = document.getElementById('idleLogoWrap');
+            const idleLogo = document.getElementById('idleLogo');
+            const idleFallback = document.getElementById('idleFallback');
+            const soundHint = document.getElementById('soundHint');
 
             const dataUrl = "{{ url_for('mentor_monitor_data') }}";
             const streamUrl = "{{ url_for('mentor_monitor_stream') }}";
@@ -424,6 +720,13 @@
             let pollTimer = null;
             let refreshing = false;
             let queuedRefresh = false;
+
+            let sessionHadPeople = {{ 'true' if signed_in_logs else 'false' }};
+            let selfDestructRunning = false;
+            let selfDestructHandled = false;
+            let idleScreenActive = false;
+            let pendingSessionOver = false;
+            let idleTeamLogos = [];
 
             const AUTO_SCROLL_SPEED = 0.065;          // pixels per millisecond
             const AUTO_SCROLL_START_HOLD = 1400;      // pause before first movement
@@ -448,7 +751,7 @@
                 const delta = Math.min(timestamp - scrollLastTime, 64);
                 scrollLastTime = timestamp;
 
-                if (document.hidden || timestamp < scrollPauseUntil) return;
+                if (document.hidden || selfDestructRunning || idleScreenActive || timestamp < scrollPauseUntil) return;
 
                 const bottom = maxScrollTop();
                 if (bottom <= 4) {
@@ -499,6 +802,387 @@
                 window.addEventListener('pagehide', () => {
                     if (scrollFrame) window.cancelAnimationFrame(scrollFrame);
                 }, { once: true });
+            }
+
+            // ======================================
+            // SOUND
+            // ======================================
+            let audioCtx = null;
+            let masterGain = null;
+            let drone = null;
+            let droneGain = null;
+
+            function ensureAudio() {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextClass) return null;
+
+                if (!audioCtx) {
+                    audioCtx = new AudioContextClass();
+                    masterGain = audioCtx.createGain();
+                    masterGain.gain.value = 0.8;
+                    masterGain.connect(audioCtx.destination);
+                }
+
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume().then(() => {
+                        if (audioCtx.state === 'running') soundHint.hidden = true;
+                    }).catch(() => {});
+                }
+
+                soundHint.hidden = audioCtx.state === 'running';
+                return audioCtx;
+            }
+
+            function unlockAudio() {
+                const ctx = ensureAudio();
+                if (ctx && ctx.state === 'running') soundHint.hidden = true;
+            }
+
+            document.addEventListener('pointerdown', unlockAudio, { passive: true });
+            document.addEventListener('keydown', unlockAudio);
+
+            function playTone(frequency, duration, volume, type) {
+                const ctx = ensureAudio();
+                if (!ctx || !masterGain || ctx.state !== 'running') return;
+
+                const now = ctx.currentTime;
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = type || 'sine';
+                osc.frequency.setValueAtTime(frequency, now);
+                gain.gain.setValueAtTime(0.0001, now);
+                gain.gain.exponentialRampToValueAtTime(volume, now + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+                osc.connect(gain).connect(masterGain);
+                osc.start(now);
+                osc.stop(now + duration + 0.05);
+            }
+
+            // Same pleasant chime for check-in and check-out.
+            function playSuccessChime() {
+                playTone(880, 0.4, 0.18, 'sine');
+                window.setTimeout(() => playTone(1174.66, 0.4, 0.16, 'sine'), 85);
+                window.setTimeout(() => playTone(1567.98, 0.55, 0.14, 'sine'), 170);
+            }
+
+            function playCountdownBeep(number) {
+                const frequency = 520 + (10 - number) * 48;
+                playTone(frequency, 0.1, 0.32, number <= 3 ? 'sawtooth' : 'square');
+                if (number <= 3) {
+                    window.setTimeout(() => playTone(frequency * 1.5, 0.07, 0.24, 'square'), 90);
+                }
+            }
+
+            function startDrone() {
+                const ctx = ensureAudio();
+                if (!ctx || !masterGain || ctx.state !== 'running') return;
+                stopDrone();
+
+                const osc = ctx.createOscillator();
+                const filter = ctx.createBiquadFilter();
+                const gain = ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.value = 42;
+                filter.type = 'lowpass';
+                filter.frequency.value = 110;
+                gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.055, ctx.currentTime + 1.2);
+                osc.connect(filter).connect(gain).connect(masterGain);
+                osc.start();
+                drone = osc;
+                droneGain = gain;
+            }
+
+            function stopDrone() {
+                if (!drone) return;
+                const ctx = audioCtx;
+                const osc = drone;
+                const gain = droneGain;
+                drone = null;
+                droneGain = null;
+                if (!ctx || !gain) return;
+                try {
+                    const level = Math.max(gain.gain.value, 0.0001);
+                    gain.gain.cancelScheduledValues(ctx.currentTime);
+                    gain.gain.setValueAtTime(level, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+                    osc.stop(ctx.currentTime + 0.4);
+                } catch (error) {
+                    // The oscillator may already have been stopped.
+                }
+            }
+
+            function playExplosionSound() {
+                const ctx = ensureAudio();
+                if (!ctx || !masterGain || ctx.state !== 'running') return;
+
+                const now = ctx.currentTime + 0.01;
+                const duration = 2.4;
+                const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < data.length; i += 1) {
+                    const progress = i / data.length;
+                    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - progress, 1.7);
+                }
+
+                const noise = ctx.createBufferSource();
+                noise.buffer = buffer;
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(2200, now);
+                filter.frequency.exponentialRampToValueAtTime(60, now + duration);
+                const noiseGain = ctx.createGain();
+                noiseGain.gain.setValueAtTime(0.95, now);
+                noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+                noise.connect(filter).connect(noiseGain).connect(masterGain);
+                noise.start(now);
+                noise.stop(now + duration);
+
+                const boom = ctx.createOscillator();
+                const boomGain = ctx.createGain();
+                boom.type = 'sine';
+                boom.frequency.setValueAtTime(130, now);
+                boom.frequency.exponentialRampToValueAtTime(26, now + 1.6);
+                boomGain.gain.setValueAtTime(0.85, now);
+                boomGain.gain.exponentialRampToValueAtTime(0.0001, now + 2);
+                boom.connect(boomGain).connect(masterGain);
+                boom.start(now);
+                boom.stop(now + 2.05);
+            }
+
+            function wait(ms) {
+                return new Promise(resolve => window.setTimeout(resolve, ms));
+            }
+
+            function speakSessionOver() {
+                return new Promise(resolve => {
+                    if (!('speechSynthesis' in window)) {
+                        window.setTimeout(resolve, 1400);
+                        return;
+                    }
+
+                    let finished = false;
+                    const finish = () => {
+                        if (finished) return;
+                        finished = true;
+                        resolve();
+                    };
+                    // Start the fallback before touching the utterance: some browsers
+                    // expose a partial speech API whose setters can throw.
+                    window.setTimeout(finish, 3800);
+
+                    try {
+                        const utterance = new SpeechSynthesisUtterance('Session over.');
+                        utterance.pitch = 0.15;
+                        utterance.rate = 0.62;
+                        utterance.volume = 1;
+                        const voices = window.speechSynthesis.getVoices();
+                        const englishVoices = voices.filter(voice => /^en/i.test(voice.lang));
+                        const preferred = englishVoices.find(voice =>
+                            /(male|daniel|alex|david|fred|google uk english male)/i.test(voice.name)
+                        ) || englishVoices[0];
+                        if (preferred) utterance.voice = preferred;
+
+                        utterance.onend = finish;
+                        utterance.onerror = finish;
+                        window.speechSynthesis.cancel();
+                        window.speechSynthesis.speak(utterance);
+                    } catch (error) {
+                        finish();
+                    }
+                });
+            }
+
+            // ======================================
+            // SELF-DESTRUCT / STANDBY SCREEN
+            // ======================================
+            function chooseIdleLogo(teamLogos) {
+                const teams = Array.isArray(teamLogos) ? teamLogos : [];
+                idleLogo.onerror = null;
+                if (!teams.length) {
+                    idleLogo.hidden = true;
+                    idleFallback.hidden = false;
+                    idleFallback.textContent = 'ROBOTICS';
+                    return;
+                }
+
+                const team = teams[Math.floor(Math.random() * teams.length)];
+                idleLogo.hidden = false;
+                idleFallback.hidden = true;
+                idleLogo.src = team.url;
+                idleLogo.alt = (team.name || 'Team') + ' logo';
+                idleLogo.onerror = () => {
+                    idleLogo.hidden = true;
+                    idleFallback.hidden = false;
+                    idleFallback.textContent = (team.name || 'ROBOTICS').toUpperCase();
+                };
+                idleLogoWrap.style.animationDuration = (10 + Math.random() * 8) + 's';
+                idleLogoWrap.style.animationDirection = Math.random() > 0.5 ? 'alternate' : 'alternate-reverse';
+            }
+
+            function enterIdleScreen(data) {
+                if (idleScreenActive) return;
+                idleScreenActive = true;
+                idleTeamLogos = data && Array.isArray(data.team_logos) ? data.team_logos : idleTeamLogos;
+                chooseIdleLogo(idleTeamLogos);
+                idleScreen.hidden = false;
+                idleScreen.classList.remove('fade-out');
+
+                grid.innerHTML = '';
+                grid.hidden = true;
+                emptyState.hidden = true;
+                toastsEl.innerHTML = '';
+                countEl.textContent = '0 signed in';
+            }
+
+            function exitIdleScreen() {
+                if (!idleScreenActive) return;
+                idleScreenActive = false;
+                idleScreen.classList.add('fade-out');
+                window.setTimeout(() => {
+                    idleScreen.hidden = true;
+                    idleScreen.classList.remove('fade-out');
+                }, 800);
+            }
+
+            function resetSelfDestructUi() {
+                selfDestructOverlay.hidden = true;
+                selfDestructOverlay.classList.remove('fade-out');
+                sdMain.hidden = false;
+                sdCount.hidden = false;
+                sdCount.textContent = '10';
+                sdVoice.hidden = true;
+                sdSessionOver.hidden = true;
+            }
+
+            function spawnBlastShards() {
+                const centerX = window.innerWidth / 2;
+                const centerY = window.innerHeight / 2;
+                const colors = ['#ffffff', '#fde68a', '#fbbf24', '#f97316', '#ef4444', '#7f1d1d'];
+
+                for (let i = 0; i < 190; i += 1) {
+                    const shard = document.createElement('span');
+                    shard.className = 'blast-particle';
+                    shard.style.left = centerX + 'px';
+                    shard.style.top = centerY + 'px';
+                    shard.style.width = (6 + Math.random() * 24) + 'px';
+                    shard.style.height = (4 + Math.random() * 16) + 'px';
+                    shard.style.backgroundColor = colors[i % colors.length];
+
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = 120 + Math.random() * Math.max(window.innerWidth, window.innerHeight) * 0.72;
+                    shard.style.setProperty('--dx', (Math.cos(angle) * distance) + 'px');
+                    shard.style.setProperty('--dy', (Math.sin(angle) * distance) + 'px');
+                    shard.style.setProperty('--rot', (Math.random() * 1080 - 540) + 'deg');
+                    shard.style.setProperty('--duration', (0.7 + Math.random() * 1.1) + 's');
+                    shard.style.animationDelay = (Math.random() * 0.12) + 's';
+                    document.body.appendChild(shard);
+                    window.setTimeout(() => shard.remove(), 2200);
+                }
+            }
+
+            async function blastScreen() {
+                playExplosionSound();
+                explosionFlash.classList.remove('go');
+                void explosionFlash.offsetWidth;
+                explosionFlash.classList.add('go');
+                document.body.classList.add('explosion-shake');
+                window.setTimeout(() => document.body.classList.remove('explosion-shake'), 900);
+                spawnBlastShards();
+                await wait(1550);
+            }
+
+            async function startSelfDestruct(data) {
+                if (selfDestructRunning) return;
+                selfDestructRunning = true;
+                selfDestructHandled = true;
+                sessionHadPeople = false;
+                pendingSessionOver = false;
+                toastsEl.innerHTML = '';
+                selfDestructOverlay.hidden = false;
+                selfDestructOverlay.classList.remove('fade-out');
+                sdMain.hidden = false;
+                sdCount.hidden = false;
+                sdCount.textContent = '10';
+                sdVoice.hidden = true;
+                sdSessionOver.hidden = true;
+
+                ensureAudio();
+                playSuccessChime();
+                startDrone();
+
+                for (let number = 10; number >= 1; number -= 1) {
+                    sdCount.textContent = String(number);
+                    playCountdownBeep(number);
+
+                    if (sdCount.animate) {
+                        sdCount.animate(
+                            [
+                                { transform: 'scale(1.35)', opacity: 0.55, filter: 'blur(2px)' },
+                                { transform: 'scale(1)', opacity: 1, filter: 'blur(0)' },
+                            ],
+                            { duration: 340, easing: 'ease-out' }
+                        );
+                    }
+
+                    await wait(900 - (10 - number) * 70);
+                }
+
+                sdCount.textContent = '0';
+                playTone(1500, 0.22, 0.35, 'sawtooth');
+                await wait(350);
+
+                stopDrone();
+                sdMain.hidden = true;
+                sdVoice.hidden = false;
+                await speakSessionOver();
+                await wait(350);
+                sdVoice.hidden = true;
+
+                await blastScreen();
+
+                sdSessionOver.hidden = false;
+                await wait(2600);
+
+                enterIdleScreen(data);
+                selfDestructOverlay.classList.add('fade-out');
+                await wait(550);
+                resetSelfDestructUi();
+                selfDestructRunning = false;
+                refresh();
+            }
+
+            function handleSnapshot(data) {
+                if (selfDestructRunning) {
+                    schedule();
+                    return;
+                }
+
+                if (selfDestructHandled) pendingSessionOver = false;
+
+                const hasPeople = data.logs.length > 0;
+                if (hasPeople) sessionHadPeople = true;
+                if (data.active) selfDestructHandled = false;
+
+                if (data.active || hasPeople) {
+                    pendingSessionOver = false;
+                    if (idleScreenActive) exitIdleScreen();
+                    renderLogs(data.logs);
+                    updateStatus(data);
+                    schedule();
+                    return;
+                }
+
+                if (!selfDestructHandled && (pendingSessionOver || sessionHadPeople)) {
+                    pendingSessionOver = false;
+                    selfDestructHandled = true;
+                    startSelfDestruct(data);
+                    schedule();
+                    return;
+                }
+
+                if (!idleScreenActive) enterIdleScreen(data);
+                schedule();
             }
 
             function buildCard(log) {
@@ -649,6 +1333,7 @@
                 });
                 flashScreen('in');
                 showMonitorToast('in', log.name);
+                playSuccessChime();
             }
 
             function explodeCard(card) {
@@ -669,6 +1354,7 @@
                 showMonitorToast('out', card.dataset.logName || 'Someone');
                 flashScreen('out');
                 screenShake();
+                playSuccessChime();
 
                 card.classList.add('card-leave');
                 window.setTimeout(() => card.remove(), 900);
@@ -730,7 +1416,7 @@
 
             function schedule() {
                 window.clearTimeout(pollTimer);
-                pollTimer = window.setTimeout(refresh, active ? 10000 : 60000);
+                pollTimer = window.setTimeout(refresh, (active || idleScreenActive) ? 10000 : 60000);
             }
 
             function refresh() {
@@ -747,9 +1433,7 @@
                     })
                     .then(data => {
                         active = !!data.active;
-                        renderLogs(data.logs);
-                        updateStatus(data);
-                        schedule();
+                        handleSnapshot(data);
                     })
                     .catch(() => schedule())
                     .finally(() => {
@@ -763,7 +1447,15 @@
 
             if (window.EventSource) {
                 const events = new EventSource(streamUrl);
-                events.addEventListener('attendance', refresh);
+                events.addEventListener('attendance', event => {
+                    try {
+                        const payload = JSON.parse(event.data);
+                        if (payload.action === 'SESSION_OVER') pendingSessionOver = true;
+                    } catch (error) {
+                        // A malformed push should not stop the monitor from refreshing.
+                    }
+                    refresh();
+                });
                 window.addEventListener('pagehide', () => events.close(), { once: true });
             }
 

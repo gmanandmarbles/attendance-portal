@@ -724,6 +724,53 @@ def dashboard():
         server_time_str=f"{now_mountain:%Y-%m-%d %I:%M %p} {local_tz_abbr(now_mountain)}"
     )
 
+def _finish_session_if_last_mentor(session_id, departing_user_id, now):
+    """End the session and clear it out when the final mentor leaves.
+
+    Returns True when this departure was the last mentor/admin in the session.
+    The caller is responsible for committing the changes.
+    """
+    if not session_id:
+        return False
+
+    other_active_mentors = AttendanceLog.query.join(User).filter(
+        AttendanceLog.session_id == session_id,
+        AttendanceLog.check_out == None,
+        User.role.in_(['mentor', 'admin']),
+        User.id != departing_user_id
+    ).count()
+
+    if other_active_mentors:
+        return False
+
+    unclaimed_student_logs = AttendanceLog.query.join(User).filter(
+        AttendanceLog.session_id == session_id,
+        AttendanceLog.check_out == None,
+        User.role == 'student'
+    ).all()
+    for unclosed_log in unclaimed_student_logs:
+        db.session.delete(unclosed_log)
+
+    # Visitors still signed in when the last mentor leaves are signed out
+    # (not deleted), so the record of who visited is kept.
+    stray_visitor_logs = AttendanceLog.query.join(User).filter(
+        AttendanceLog.session_id == session_id,
+        AttendanceLog.check_out == None,
+        User.role == 'visitor'
+    ).all()
+    for visitor_log in stray_visitor_logs:
+        visitor_log.check_out = now
+
+    # The last mentor leaving ends the session, rather than leaving it open
+    # until its scheduled end time.
+    build_session = BuildSession.query.get(session_id)
+    if (build_session
+            and build_session.start_time <= now < build_session.end_time):
+        build_session.end_time = now
+
+    return True
+
+
 @app.route('/attendance/checkout/<int:log_id>', methods=['POST'])
 @login_required
 def checkout_attendance(log_id):
@@ -737,8 +784,13 @@ def checkout_attendance(log_id):
         flash("That attendance session is already closed or was not found.", "warning")
         return redirect(url_for('dashboard'))
 
-    log.check_out = get_local_now()
+    now = get_local_now()
+    log.check_out = now
+    session_over = False
+    if log.user.is_mentor_or_admin:
+        session_over = _finish_session_if_last_mentor(log.session_id, log.user_id, now)
     db.session.commit()
+    notify_monitor('SESSION_OVER' if session_over else 'CHECK_OUT')
     flash(f"You signed out of {log.session.title}.", "success")
     return redirect(url_for('dashboard'))
 
@@ -1122,6 +1174,19 @@ def _monitor_log_data(log):
     }
 
 
+def _monitor_team_logos():
+    """Team logos used for the between-sessions standby screen."""
+    teams = Team.query.filter(Team.logo_filename.isnot(None)).order_by(Team.name.asc()).all()
+    return [
+        {
+            'id': team.id,
+            'name': team.name,
+            'url': url_for('team_logo', team_id=team.id, v=team.logo_filename),
+        }
+        for team in teams
+    ]
+
+
 def _monitor_snapshot(now, current_session, signed_in_logs):
     return {
         'active': current_session is not None,
@@ -1131,6 +1196,7 @@ def _monitor_snapshot(now, current_session, signed_in_logs):
         } if current_session else None,
         'updated_at': f"{now:%I:%M:%S %p}".lstrip('0'),
         'logs': [_monitor_log_data(log) for log in signed_in_logs],
+        'team_logos': _monitor_team_logos(),
     }
 
 
@@ -1237,8 +1303,13 @@ def mentor_checkout_attendance(log_id):
     if not log:
         flash("That attendance session is already closed or was not found.", "warning")
     else:
-        log.check_out = get_local_now()
+        now = get_local_now()
+        log.check_out = now
+        session_over = False
+        if log.user.is_mentor_or_admin:
+            session_over = _finish_session_if_last_mentor(log.session_id, log.user_id, now)
         db.session.commit()
+        notify_monitor('SESSION_OVER' if session_over else 'CHECK_OUT')
         selected_id = log.user_id
         flash(f"Closed {log.user.name or log.user.email}'s session for {log.session.title}.", "success")
 
@@ -1258,8 +1329,14 @@ def mentor_wipe_checkout(log_id):
         selected_id = log.user_id
         name = log.user.name or log.user.email
         session_title = log.session.title if log.session else "their open session"
+        session_over = False
+        if log.user.is_mentor_or_admin:
+            session_over = _finish_session_if_last_mentor(
+                log.session_id, log.user_id, get_local_now()
+            )
         db.session.delete(log)
         db.session.commit()
+        notify_monitor('SESSION_OVER' if session_over else 'CHECK_OUT')
         flash(f"Signed {name} out of {session_title} with no hours credited.", "success")
 
     return redirect(url_for('mentor_students', user_id=selected_id))
@@ -1278,8 +1355,16 @@ def mentor_delete_log(log_id):
         selected_id = log.user_id
         name = log.user.name or log.user.email
         hours = log.duration_hours
+        was_open = log.check_out is None
+        session_over = False
+        if was_open and log.user.is_mentor_or_admin:
+            session_over = _finish_session_if_last_mentor(
+                log.session_id, log.user_id, get_local_now()
+            )
         db.session.delete(log)
         db.session.commit()
+        if was_open or session_over:
+            notify_monitor('SESSION_OVER' if session_over else 'CHECK_OUT')
         flash(f"Deleted a {hours} hr record for {name}.", "success")
 
     return redirect(url_for('mentor_students', user_id=selected_id))
@@ -2632,42 +2717,17 @@ def kiosk_scan():
 
     if open_log:
         open_log.check_out = now
-        db.session.commit()
-
+        session_over = False
         if user.is_mentor_or_admin:
-            other_active_mentors = AttendanceLog.query.join(User).filter(
-                AttendanceLog.session_id == open_log.session_id,
-                AttendanceLog.check_out == None,
-                User.role.in_(['mentor', 'admin']),
-                User.id != user.id
-            ).count()
-
-            if other_active_mentors == 0:
-                unclaimed_student_logs = AttendanceLog.query.join(User).filter(
-                    AttendanceLog.session_id == open_log.session_id,
-                    AttendanceLog.check_out == None,
-                    User.role == 'student'
-                ).all()
-
-                for unclosed_log in unclaimed_student_logs:
-                    db.session.delete(unclosed_log)
-
-                # Visitors still signed in when the last mentor leaves are signed out
-                # (not deleted), so the record of who visited is kept.
-                stray_visitor_logs = AttendanceLog.query.join(User).filter(
-                    AttendanceLog.session_id == open_log.session_id,
-                    AttendanceLog.check_out == None,
-                    User.role == 'visitor'
-                ).all()
-                for visitor_log in stray_visitor_logs:
-                    visitor_log.check_out = now
-
-                db.session.commit()
+            session_over = _finish_session_if_last_mentor(
+                open_log.session_id, user.id, now
+            )
+        db.session.commit()
 
         # The kiosk is a shared, public screen: never echo a name, email, or barcode
         # back to it. Keep the confirmation deliberately generic.
         sign_out_message = "You're signed out."
-        notify_monitor('CHECK_OUT')
+        notify_monitor('SESSION_OVER' if session_over else 'CHECK_OUT')
         return jsonify({
             "status": "success", 
             "action": "CHECK_OUT",
